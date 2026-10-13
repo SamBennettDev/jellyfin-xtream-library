@@ -47,13 +47,18 @@ test('Native Tuner description no longer claims the tuner is hidden from the Das
         'old text claimed the plugin tuner is hidden, but it is registered as an ITunerHost');
 });
 
-test('Native Tuner description warns users not to manually add the Xtream Library entry', () => {
-    // Jellyfin lists the registered ITunerHost implementation in the Add Tuner type dropdown.
-    // The plugin already controls it via the checkbox above; manual addition duplicates channels.
+test('Native Tuner description says the plugin lists itself under Tuner Devices', () => {
+    // Jellyfin shows Live TV only once a tuner is listed under Tuner Devices (GitHub #152). The
+    // plugin adds that entry itself when Live TV and Native Tuner are on, so the text has to say
+    // both are needed, and that a second entry added by hand is not.
     assert.match(
         CONFIG_HTML,
-        /Xtream Library.*Add Tuner.*Do\s*<strong>\s*not\s*<\/strong>\s*add it manually/is,
-        'expected an explicit warning that the Xtream Library dropdown entry is the plugin itself');
+        /Enable Live TV<\/strong>\s*both on, the plugin adds itself under Dashboard.*Tuner Devices/is,
+        'expected the help text to say the plugin adds its own tuner entry when both checkboxes are on');
+    assert.match(
+        CONFIG_HTML,
+        /Add Tuner.*do\s*<strong>\s*not\s*<\/strong>\s*add a second one by hand/is,
+        'expected a warning against adding a second Xtream Library entry by hand');
 });
 
 test('Setup URLs section explains the three URLs go in three different places', () => {

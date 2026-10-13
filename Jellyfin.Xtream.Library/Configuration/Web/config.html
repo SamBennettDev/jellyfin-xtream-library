@@ -973,8 +973,7 @@
                                 <div class="fieldDescription checkboxFieldDescription">
                                     Registers a custom tuner type that skips FFmpeg probing, cutting channel switch time roughly in half. Channels are published automatically when this checkbox is on.
                                     <br><br>
-                                    An entry labelled <strong>Xtream Library</strong> also appears in Jellyfin's Add Tuner type dropdown (Dashboard &rarr; Live TV &rarr; Tuner Devices &rarr; Add Tuner Device). That entry is this plugin's own tuner. Do <strong>not</strong> add it manually: this checkbox already controls it, and it is active whenever the checkbox is on.
-                                    <br><br>
+                                    With this checkbox and <strong>Enable Live TV</strong> both on, the plugin adds itself under Dashboard &rarr; Live TV &rarr; Tuner Devices as <strong>Xtream Library (added by the plugin)</strong>. Jellyfin only shows Live TV once a tuner is listed there. An Xtream Library entry also appears in the Add Tuner type dropdown: do <strong>not</strong> add a second one by hand, one is enough. Turning either checkbox off removes the plugin's entry again.<br><br>
                                     <strong>Pick one tuner mode, not both.</strong> If you have also added the M3U Playlist URL below as a manual <strong>M3U Tuner</strong> (not HDHomeRun) under Dashboard &rarr; Live TV &rarr; Tuner Devices, every channel will appear twice in the Live TV Guide. Either disable this checkbox, or remove the manually-added M3U tuner from the Dashboard.
                                     <br><br>
                                     Trade-off: the native tuner currently forces transcoding while the manual M3U tuner remuxes. If your provider stream and client both support direct stream, the M3U path uses less CPU.
