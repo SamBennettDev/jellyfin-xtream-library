@@ -1249,6 +1249,13 @@ public class LiveTvService : IDisposable
 
             sb.Append(CultureInfo.InvariantCulture, $"  <channel id=\"{EscapeXml(channelId)}\">\n");
             sb.Append(CultureInfo.InvariantCulture, $"    <display-name>{EscapeXml(cleanName)}</display-name>\n");
+
+            // The channel number as a second display-name, the usual XMLTV way to carry it; Jellyfin
+            // reads a numeric display-name as the channel number. It matches tvg-chno in LiveTv.m3u,
+            // whose tvg-id is the provider's own id rather than this file's channel id, so the M3U
+            // tuner can line its channels up with this guide by number instead of by name alone,
+            // which picks the wrong guide when two channels clean to the same name (GitHub #147).
+            sb.Append(CultureInfo.InvariantCulture, $"    <display-name>{ChannelNumbering.Resolve(channel, epgStride, epgNumberByCategory)}</display-name>\n");
             var iconUrl = ChannelLogoResolver.ResolveDisplayUrl(channel.StreamIcon, channel.StreamId, baseUrl);
             if (!string.IsNullOrEmpty(iconUrl))
             {

@@ -82,6 +82,39 @@ public sealed class XmltvPassthroughTests : IDisposable
 
     private static string XmltvTime(DateTimeOffset t) => t.UtcDateTime.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + " +0000";
 
+    // GitHub #147. LiveTv.m3u carries the provider's tvg-id, Epg.xml its own xtream_ ids, so
+    // Jellyfin's M3U tuner cannot match them by id and falls back to number, then name. Two
+    // channels that clean to the same name then share one guide. The number has to be in both.
+    [Fact]
+    public async Task EveryEpgChannelCarriesTheSameNumberAsTheM3U()
+    {
+        var channels = new List<LiveStreamInfo>
+        {
+            new() { StreamId = 1, Num = 5, Name = "Same Name", EpgChannelId = "one.uk" },
+            new() { StreamId = 2, Num = 9, Name = "Same Name", EpgChannelId = "two.uk" },
+        };
+        _client
+            .Setup(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(channels);
+        _client
+            .Setup(c => c.GetXmltvAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        var xml = await _liveTvService.GetXmltvEpgAsync(CancellationToken.None);
+        var m3u = LiveTvService.GenerateM3U(channels, Plugin.Instance.Configuration, catchupOnly: false, "http://127.0.0.1:8096", new Dictionary<int, string>());
+
+        var numberByEpgId = XDocument.Parse(xml).Descendants("channel").ToDictionary(
+            c => c.Attribute("id")!.Value,
+            c => c.Elements("display-name").Select(d => d.Value).Last());
+        var m3uNumbers = Regex.Matches(m3u, "tvg-chno=\"([^\"]+)\"").Select(m => m.Groups[1].Value).ToList();
+
+        numberByEpgId.Should().HaveCount(2);
+        numberByEpgId.Values.Should().BeEquivalentTo(m3uNumbers, "the guide and the playlist have to agree on every channel number");
+        numberByEpgId[XtreamTunerHost.BuildChannelId(0, 1)].Should().NotBe(numberByEpgId[XtreamTunerHost.BuildChannelId(0, 2)]);
+        XDocument.Parse(xml).Descendants("channel").Select(c => c.Element("display-name")!.Value)
+            .Should().OnlyContain(n => n == "Same Name", "the first display-name stays the name Jellyfin shows");
+    }
+
     [Fact]
     public async Task ACutOffXmltvFallsBackToTheJsonGuideInsteadOfHanging()
     {
