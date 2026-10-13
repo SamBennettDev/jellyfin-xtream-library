@@ -72,7 +72,7 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     /// <inheritdoc />
     public async Task Open(CancellationToken openCancellationToken)
     {
-        _logger.LogInformation("Opening stream: {Url}", MediaSource.Path);
+        _logger.LogInformation("Opening stream: {Url}", StreamUrlRedactor.Redact(MediaSource.Path));
         try
         {
             _response = await _httpClient.GetAsync(
@@ -88,7 +88,7 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
             _logger.LogError(
                 ex,
                 "Failed to open stream {Url} — HTTP {StatusCode}: {Reason}. Check BaseUrl, Username, and Password in plugin settings.",
-                MediaSource.Path,
+                StreamUrlRedactor.Redact(MediaSource.Path),
                 (int?)ex.StatusCode,
                 ex.Message);
             throw;
