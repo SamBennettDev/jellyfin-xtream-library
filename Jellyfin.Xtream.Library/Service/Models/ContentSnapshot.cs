@@ -33,6 +33,14 @@ public class ContentSnapshot
     public string ConfigFingerprint { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets a value indicating whether every series STRM was last written with the ids
+    /// from get_series_info. False in snapshots from before 2.0.12.0: in Dispatcharr Mode those
+    /// versions wrote ids Dispatcharr's /series/ route does not accept (GitHub #153), and smart
+    /// skip would never rewrite them, so the next series pass skips nothing.
+    /// </summary>
+    public bool SeriesIdsFromXtreamApi { get; set; }
+
+    /// <summary>
     /// Gets or sets all movies indexed by StreamId.
     /// </summary>
     public Dictionary<int, MovieSnapshot> Movies { get; set; } = new();

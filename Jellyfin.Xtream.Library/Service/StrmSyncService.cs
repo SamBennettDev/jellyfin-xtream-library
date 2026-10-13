@@ -469,43 +469,6 @@ public partial class StrmSyncService
         return await _client.GetVodInfoAsync(connectionInfo, streamId, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Gets series metadata and its episode list. Same Dispatcharr-Mode-first, classic-fallback
-    /// shape as <see cref="GetMovieAdvancedInfoAsync"/>. The Dispatcharr path needs two calls
-    /// (series metadata, then episodes) since Dispatcharr's own provider-info response nests an
-    /// episode list that lacks the per-provider stream_id needed to build a playable STRM URL.
-    /// Falls back to the single classic call as a whole if either Dispatcharr call comes back
-    /// empty, rather than mixing metadata from one source with episodes from the other.
-    /// </summary>
-    /// <param name="provider">The provider config, used for EffectiveDispatcharrBaseUrl.</param>
-    /// <param name="connectionInfo">Connection info for the classic Xtream fallback call.</param>
-    /// <param name="enableDispatcharrMode">Whether Dispatcharr Mode is on for this provider.</param>
-    /// <param name="seriesId">The series' Xtream/Dispatcharr series ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The series' metadata and episode list.</returns>
-    internal async Task<SeriesStreamInfo> GetSeriesAdvancedInfoAsync(
-        ProviderConfig provider,
-        ConnectionInfo connectionInfo,
-        bool enableDispatcharrMode,
-        int seriesId,
-        CancellationToken cancellationToken)
-    {
-        if (enableDispatcharrMode)
-        {
-            var info = await _dispatcharrClient.GetSeriesProviderInfoAsync(provider.EffectiveDispatcharrBaseUrl, seriesId, cancellationToken).ConfigureAwait(false);
-            if (info != null)
-            {
-                var episodes = await _dispatcharrClient.GetSeriesEpisodesAsync(provider.EffectiveDispatcharrBaseUrl, seriesId, cancellationToken).ConfigureAwait(false);
-                if (episodes.Count > 0)
-                {
-                    return new SeriesStreamInfo { Info = info, Episodes = episodes };
-                }
-            }
-        }
-
-        return await _client.GetSeriesStreamsBySeriesAsync(connectionInfo, seriesId, cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task RetrySingleSeriesAsync(
         ProviderConfig provider,
         string seriesPath,
@@ -514,14 +477,11 @@ public partial class StrmSyncService
         CancellationToken cancellationToken)
     {
         var connectionInfo = new ConnectionInfo(provider.BaseUrl, provider.Username, provider.Password);
-        var enableDispatcharrMode = provider.EnableDispatcharrMode && !string.IsNullOrEmpty(provider.DispatcharrApiUser);
-        if (enableDispatcharrMode)
-        {
-            _dispatcharrClient.RequestDelayMs = provider.RequestDelayMs;
-            _dispatcharrClient.Configure(provider.DispatcharrApiUser, provider.DispatcharrApiPass);
-        }
 
-        var seriesInfo = await GetSeriesAdvancedInfoAsync(provider, connectionInfo, enableDispatcharrMode, item.ItemId, cancellationToken).ConfigureAwait(false);
+        // Series always come from get_series_info, also in Dispatcharr Mode. Dispatcharr's own
+        // XC answer carries the ids its /series/ route accepts; its REST API numbers series and
+        // episodes differently (GitHub #153).
+        var seriesInfo = await _client.GetSeriesStreamsBySeriesAsync(connectionInfo, item.ItemId, cancellationToken).ConfigureAwait(false);
 
         if (seriesInfo.Episodes == null || seriesInfo.Episodes.Count == 0)
         {
@@ -2719,11 +2679,17 @@ public partial class StrmSyncService
         var globalConfig = Plugin.Instance.Configuration;
         var categories = await _client.GetSeriesCategoryAsync(connectionInfo, cancellationToken).ConfigureAwait(false);
         var processedSeriesIds = new ConcurrentDictionary<int, bool>();
+
+        // In Dispatcharr Mode, versions before 2.0.12.0 wrote series STRMs with ids Dispatcharr's
+        // /series/ route does not accept (GitHub #153). The incremental filter and every smart
+        // skip below decide from the snapshot or from what is on disk, so none of them would ever
+        // rewrite those files. One pass with all of them off reads every series again.
         var enableDispatcharrMode = provider.EnableDispatcharrMode && !string.IsNullOrEmpty(provider.DispatcharrApiUser);
-        if (enableDispatcharrMode)
+        var repairSeriesIds = SeriesIdsNeedRepair(provider, hintSnapshot);
+        var smartSkipSeries = provider.SmartSkipExisting && !repairSeriesIds;
+        if (repairSeriesIds)
         {
-            _dispatcharrClient.RequestDelayMs = provider.RequestDelayMs;
-            _dispatcharrClient.Configure(provider.DispatcharrApiUser, provider.DispatcharrApiPass);
+            _logger.LogInformation("Re-reading every series once to correct episode ids written in Dispatcharr Mode by earlier versions (GitHub #153)");
         }
 
         // Parse folder mappings (category ID → folder names) - only in Multiple folder mode.
@@ -2985,7 +2951,7 @@ public partial class StrmSyncService
             }
 
             // Incremental sync: filter to only new/modified series
-            if (previousSnapshot != null)
+            if (previousSnapshot != null && !repairSeriesIds)
             {
                 var unchangedSeries = new List<(Series Series, HashSet<int> CategoryIds)>();
                 batchSeries = batchSeries.Where(s =>
@@ -3076,7 +3042,7 @@ public partial class StrmSyncService
                 // Determine which series will NOT be smart-skipped (need API call)
                 var seriesToPreFetch = batchSeries.Where(s =>
                 {
-                    if (!provider.SmartSkipExisting || hintSnapshot == null)
+                    if (!smartSkipSeries || hintSnapshot == null)
                     {
                         return true;
                     }
@@ -3140,7 +3106,7 @@ public partial class StrmSyncService
                         {
                             try
                             {
-                                var info = await GetSeriesAdvancedInfoAsync(provider, connectionInfo, enableDispatcharrMode, seriesEntry.Series.SeriesId, ct).ConfigureAwait(false);
+                                var info = await _client.GetSeriesStreamsBySeriesAsync(connectionInfo, seriesEntry.Series.SeriesId, ct).ConfigureAwait(false);
                                 seriesInfoCache[seriesEntry.Series.SeriesId] = info;
                             }
                             catch (Exception ex)
@@ -3187,7 +3153,7 @@ public partial class StrmSyncService
                     // Check if all target folders already have this series with matching episode count
                     // Also verify LastModified hasn't changed to catch new episodes
                     // Compare at second precision since LastModified comes from Unix timestamp
-                    if (provider.SmartSkipExisting && hintSnapshot != null &&
+                    if (smartSkipSeries && hintSnapshot != null &&
                         hintSnapshot.Series.TryGetValue(series.SeriesId, out var hintEntry) &&
                         hintEntry.EpisodeCount > 0 &&
                         Math.Abs((series.LastModified.GetValueOrDefault() - hintEntry.LastModified).TotalSeconds) < 1)
@@ -3280,7 +3246,7 @@ public partial class StrmSyncService
                     }
                     else
                     {
-                        seriesInfo = await GetSeriesAdvancedInfoAsync(provider, connectionInfo, enableDispatcharrMode, series.SeriesId, ct).ConfigureAwait(false);
+                        seriesInfo = await _client.GetSeriesStreamsBySeriesAsync(connectionInfo, series.SeriesId, ct).ConfigureAwait(false);
                     }
 
                     // Track for snapshot building
@@ -3352,8 +3318,12 @@ public partial class StrmSyncService
                         targetFolders.Add(string.Empty);
                     }
 
-                    // Smart skip check with exact folder name (skip when no existing folders - initial scan)
-                    if (provider.SmartSkipExisting && existingSeriesFolderCounts.Count > 0)
+                    // Smart skip check with exact folder name (skip when no existing folders - initial scan).
+                    // Not in Dispatcharr Mode: it compares file counts only, so a series whose STRMs
+                    // carry the episode ids earlier versions wrote there (GitHub #153) would keep
+                    // them. Without it the write loop below compares each file's contents and
+                    // rewrites only the ones that differ.
+                    if (smartSkipSeries && !enableDispatcharrMode && existingSeriesFolderCounts.Count > 0)
                     {
                         bool anyNeedsSync = false;
                         foreach (var targetFolder in targetFolders)
@@ -3672,6 +3642,10 @@ public partial class StrmSyncService
                     _logger.LogWarning(ex, "Failed to sync series: {SeriesName}", series.Name);
                     Interlocked.Increment(ref errors);
                     Interlocked.Increment(ref seriesSkipped);
+
+                    // A series that could not be read this run is not gone. Without this its
+                    // existing STRMs count as orphans and cleanup deletes them.
+                    KeepExistingSeriesFiles(series.Name, provider, seriesPath, categoryIds, folderMappings, seriesFolderLookup, syncedFiles);
                     failedItems.Add(new FailedItem
                     {
                         ItemType = "Series",
@@ -3765,6 +3739,47 @@ public partial class StrmSyncService
         }
 
         return TruncateFileNameToFsLimit(ApplyFileNameRegexPatterns(fileName, regexRemovalPatterns));
+    }
+
+    private static void KeepExistingSeriesFiles(
+        string seriesTitle,
+        ProviderConfig provider,
+        string seriesPath,
+        IEnumerable<int> categoryIds,
+        Dictionary<int, List<string>> folderMappings,
+        Dictionary<string, (string Path, int Count)> seriesFolderLookup,
+        ConcurrentDictionary<string, byte> syncedFiles)
+    {
+        string seriesName = SanitizeFileName(seriesTitle, provider.CustomTitleRemoveTerms);
+        int? year = ExtractYear(seriesTitle);
+        string baseName = year.HasValue ? $"{seriesName} ({year})" : seriesName;
+
+        foreach (var targetFolder in BuildSeriesTargetFolders(categoryIds, folderMappings))
+        {
+            string seriesBasePath = string.IsNullOrEmpty(targetFolder)
+                ? seriesPath
+                : Path.Combine(seriesPath, targetFolder);
+            if (!seriesFolderLookup.TryGetValue(seriesBasePath + "|" + baseName, out var match))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (var strm in Directory.GetFiles(match.Path, "*.strm", SearchOption.AllDirectories))
+                {
+                    syncedFiles.TryAdd(strm, 0);
+                }
+            }
+            catch (IOException)
+            {
+                // Best effort, as for the skipped series above.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best effort, as for the skipped series above.
+            }
+        }
     }
 
     internal static bool HasCompleteExistingSeriesFolders(
@@ -4924,6 +4939,31 @@ public partial class StrmSyncService
     [GeneratedRegex(@"\[\s*\]|\(\s*\)")]
     private static partial Regex EmptyBracketsPattern();
 
+    /// <summary>
+    /// Whether this provider's series STRMs may still carry the episode ids that versions before
+    /// 2.0.12.0 wrote in Dispatcharr Mode (GitHub #153). Without a snapshot nothing is skipped
+    /// anyway, so there is nothing to undo.
+    /// </summary>
+    /// <param name="provider">The provider.</param>
+    /// <param name="snapshot">The snapshot the last run saved, if any.</param>
+    /// <returns>True when the next series pass must not skip anything.</returns>
+    internal static bool SeriesIdsNeedRepair(ProviderConfig provider, ContentSnapshot? snapshot)
+        => snapshot != null
+            && !snapshot.SeriesIdsFromXtreamApi
+            && provider.EnableDispatcharrMode
+            && !string.IsNullOrEmpty(provider.DispatcharrApiUser);
+
+    /// <summary>
+    /// The <see cref="ContentSnapshot.SeriesIdsFromXtreamApi"/> value for the snapshot a run
+    /// saves. Only a run that synced series has rewritten them; otherwise what the previous
+    /// snapshot recorded still holds.
+    /// </summary>
+    /// <param name="syncedSeries">Whether this run synced series.</param>
+    /// <param name="previous">The snapshot the previous run saved, if any.</param>
+    /// <returns>The value to store.</returns>
+    internal static bool SeriesIdsFromXtreamApiAfterRun(bool syncedSeries, ContentSnapshot? previous)
+        => syncedSeries || (previous?.SeriesIdsFromXtreamApi ?? false);
+
     private async Task SaveSnapshotAsync(
         ProviderConfig provider,
         string providerKey,
@@ -4947,7 +4987,8 @@ public partial class StrmSyncService
             var snapshot = new ContentSnapshot
             {
                 ProviderUrl = provider.BaseUrl,
-                ConfigFingerprint = SnapshotService.CalculateConfigFingerprint(provider, Plugin.Instance.Configuration.EnableMetadataLookup)
+                ConfigFingerprint = SnapshotService.CalculateConfigFingerprint(provider, Plugin.Instance.Configuration.EnableMetadataLookup),
+                SeriesIdsFromXtreamApi = SeriesIdsFromXtreamApiAfterRun(provider.SyncSeries, carryForwardFrom),
             };
 
             // Movies were not synced this run, so allMovies is empty and rebuilding from it would
