@@ -51,5 +51,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IScheduledTask, SyncLibraryTask>();
         serviceCollection.AddHostedService<Service.BetaChannelManager>();
         serviceCollection.AddHostedService<Service.NativeTunerRegistration>();
+        serviceCollection.AddHostedService<Service.NativeTunerWarmup>();
     }
 }

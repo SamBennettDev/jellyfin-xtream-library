@@ -759,4 +759,62 @@ public class XtreamTunerHostTests : IDisposable
     }
 
     #endregion
+
+    #region Startup warm-up (homelab-ops #550)
+
+    [Fact]
+    public async Task Warmup_WithNativeTunerOn_LoadsTheChannelsBeforeFirstUse()
+    {
+        var config = Plugin.Instance.Configuration;
+        config.EnableLiveTv = true;
+        config.EnableNativeTuner = true;
+        config.EnableChannelNameCleaning = false;
+        _mockClient
+            .Setup(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LiveStreamInfo> { new() { StreamId = 100, Name = "BBC One", Num = 1 } });
+
+        using var warmup = new NativeTunerWarmup([_tunerHost], NullLogger<NativeTunerWarmup>.Instance, TimeSpan.Zero);
+        await warmup.StartAsync(CancellationToken.None);
+        await warmup.Running!;
+
+        _mockClient.Verify(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // The first real request is served from what the warm-up loaded.
+        var channels = await _tunerHost.GetChannels(true, CancellationToken.None);
+        channels.Should().ContainSingle();
+        _mockClient.Verify(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Warmup_WithNativeTunerOff_FetchesNothing()
+    {
+        var config = Plugin.Instance.Configuration;
+        config.EnableLiveTv = true;
+        config.EnableNativeTuner = false;
+
+        using var warmup = new NativeTunerWarmup([_tunerHost], NullLogger<NativeTunerWarmup>.Instance, TimeSpan.Zero);
+        await warmup.StartAsync(CancellationToken.None);
+        await warmup.Running!;
+
+        _mockClient.Verify(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Warmup_WhenTheProviderFails_DoesNotThrow()
+    {
+        var config = Plugin.Instance.Configuration;
+        config.EnableLiveTv = true;
+        config.EnableNativeTuner = true;
+        _mockClient
+            .Setup(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("provider down"));
+
+        using var warmup = new NativeTunerWarmup([_tunerHost], NullLogger<NativeTunerWarmup>.Instance, TimeSpan.Zero);
+        await warmup.StartAsync(CancellationToken.None);
+        var act = async () => await warmup.Running!;
+
+        await act.Should().NotThrowAsync();
+    }
+
+    #endregion
 }

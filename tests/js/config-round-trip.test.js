@@ -325,3 +325,12 @@ test('the delete question names the saved provider and folder, and what is lost'
     assert.match(message, /in \/media\/lib1\/Series\?/);
     assert.match(message, /not saved/);
 });
+
+test('the native tuner hint says when the playlists are still published', async () => {
+    const { cfg, page } = await roundTrip(Object.assign(fixture(), { EnableNativeTuner: true, PublishLiveTvPlaylists: true }));
+    assert.match(page.elements.tunerChoiceHint.innerHTML, /still on/);
+
+    page.elements.chkPublishLiveTvPlaylists.checked = false;
+    cfg.updateTunerHint();
+    assert.doesNotMatch(page.elements.tunerChoiceHint.innerHTML, /still on/);
+});

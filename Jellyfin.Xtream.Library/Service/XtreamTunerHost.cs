@@ -388,8 +388,10 @@ public class XtreamTunerHost : ITunerHost
             // switched off for a Dispatcharr proxy URL. The probe opens a short-lived connection
             // that Dispatcharr counts as a client and tears the channel down when it closes, which
             // turns into a retry storm. That is in direct tension with everything below, so the two
-            // have to be reconciled before a proxy URL ever reaches here. Live TV playlists route
-            // through Dispatcharr today; this tuner does not.
+            // have to be reconciled before a proxy URL ever reaches here. This tuner does not build
+            // Dispatcharr proxy URLs, but when the provider itself is a Dispatcharr Xtream endpoint
+            // its /live/ URLs are served by that proxy anyway, and the teardown between probe and
+            // playback has been measured there (about 1.6 s, homelab-ops #550).
             //
             // GitHub #107. No stats, so leave this empty and let Jellyfin find out for itself.
             //
