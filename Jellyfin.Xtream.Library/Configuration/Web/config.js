@@ -227,7 +227,7 @@ var XtreamLibraryConfig = (function () {
         p.SeriesFolderMode = seriesMode;
 
         if (movieMode === 'Single') {
-            p.SelectedVodCategoryIds = this.getSelectedCategoryIds('vod');
+            p.SelectedVodCategoryIds = this.getContentCategoryIdsForSave('vod');
             p.MovieFolderMappings = '';
         } else {
             // Multiple folder mode. SelectedVodCategoryIds is the only thing the sync consults to
@@ -243,7 +243,7 @@ var XtreamLibraryConfig = (function () {
         }
 
         if (seriesMode === 'Single') {
-            p.SelectedSeriesCategoryIds = this.getSelectedCategoryIds('series');
+            p.SelectedSeriesCategoryIds = this.getContentCategoryIdsForSave('series');
             p.SeriesFolderMappings = '';
         } else {
             // Same as movies above: the union of the folder-assigned categories, not the hidden
@@ -332,7 +332,8 @@ var XtreamLibraryConfig = (function () {
 
             // Schedule settings
             document.getElementById('selSyncScheduleType').value = config.SyncScheduleType || 'Interval';
-            document.getElementById('selSyncDailyHour').value = config.SyncDailyHour || 3;
+            // ?? rather than ||: hour 0 is midnight, and || moved it to 03:00 on every save.
+            document.getElementById('selSyncDailyHour').value = config.SyncDailyHour ?? 3;
             document.getElementById('selSyncDailyMinute').value = config.SyncDailyMinute || 0;
             self.updateScheduleVisibility();
 
@@ -434,7 +435,8 @@ var XtreamLibraryConfig = (function () {
 
             // Schedule settings
             config.SyncScheduleType = document.getElementById('selSyncScheduleType').value;
-            config.SyncDailyHour = parseInt(document.getElementById('selSyncDailyHour').value) || 3;
+            var dailyHour = parseInt(document.getElementById('selSyncDailyHour').value, 10);
+            config.SyncDailyHour = Number.isNaN(dailyHour) ? 3 : dailyHour;
             config.SyncDailyMinute = parseInt(document.getElementById('selSyncDailyMinute').value) || 0;
 
             // Live TV settings
@@ -1813,6 +1815,18 @@ var XtreamLibraryConfig = (function () {
         }
 
         return self.getSelectedCategoryIds('live');
+    },
+
+    // The same guard for the Movies and Series lists in Single folder mode. They are only drawn
+    // once the provider has answered, so saving while it is unreachable or still loading used to
+    // write an empty selection, which the sync reads as "every category".
+    getContentCategoryIdsForSave: function (type) {
+        const rendered = document.querySelectorAll('input[data-category-type="' + type + '"]');
+        if (rendered.length === 0) {
+            return (type === 'vod' ? this.selectedVodCategoryIds : this.selectedSeriesCategoryIds).slice();
+        }
+
+        return this.getSelectedCategoryIds(type);
     },
 
     getSelectedCategoryIds: function (type) {
