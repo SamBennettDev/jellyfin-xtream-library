@@ -248,3 +248,80 @@ test('a drawn category list is still read, so clearing every tick is saved', asy
     assert.deepStrictEqual(saved.Providers[0].SelectedVodCategoryIds, []);
     assert.deepStrictEqual(saved.Providers[0].SelectedSeriesCategoryIds, [13]);
 });
+
+// Settings page behaviour (round 2, step B). These use the same page as the round trips above.
+
+test('picking the M3U tuner turns publishing on; picking native leaves it as it was', async () => {
+    for (const publish of [true, false]) {
+        const { saved } = await roundTrip(Object.assign(fixture(), { EnableNativeTuner: true, PublishLiveTvPlaylists: publish }),
+            (cfg) => cfg.chooseTuner('m3u'));
+        assert.strictEqual(saved.EnableNativeTuner, false);
+        assert.strictEqual(saved.PublishLiveTvPlaylists, true, 'the M3U tuner reads the published playlist');
+    }
+    for (const publish of [true, false]) {
+        const { saved } = await roundTrip(Object.assign(fixture(), { EnableNativeTuner: false, PublishLiveTvPlaylists: publish }),
+            (cfg) => cfg.chooseTuner('native'));
+        assert.strictEqual(saved.EnableNativeTuner, true);
+        assert.strictEqual(saved.PublishLiveTvPlaylists, publish, 'other apps may still use the playlists');
+    }
+});
+
+test('loading shows the saved tuner and warns, without changing anything, when the M3U tuner has no playlist', async () => {
+    const { saved, page } = await roundTrip(Object.assign(fixture(), { EnableNativeTuner: false, PublishLiveTvPlaylists: false }));
+    assert.strictEqual(page.elements.radTunerM3u.checked, true);
+    assert.strictEqual(page.elements.radTunerNative.checked, false);
+    assert.strictEqual(page.elements.tunerChoiceWarning.style.display, '');
+    assert.strictEqual(saved.PublishLiveTvPlaylists, false);
+
+    const native = await roundTrip(fixture());
+    assert.strictEqual(native.page.elements.radTunerNative.checked, true);
+    assert.strictEqual(native.page.elements.tunerChoiceWarning.style.display, 'none');
+});
+
+test('switched-off Live TV and catch-up hide what depends on them', async () => {
+    const off = await roundTrip(Object.assign(fixture(), { EnableLiveTv: false, EnableCatchup: false }));
+    assert.strictEqual(off.page.elements.liveTvDependentTop.style.display, 'none');
+    assert.strictEqual(off.page.elements.liveTvDependentRest.style.display, 'none');
+    assert.strictEqual(off.page.elements.catchupDependent.style.display, 'none');
+
+    const on = await roundTrip(fixture());
+    assert.strictEqual(on.page.elements.liveTvDependentTop.style.display, '');
+    assert.strictEqual(on.page.elements.liveTvDependentRest.style.display, '');
+    assert.strictEqual(on.page.elements.catchupDependent.style.display, '');
+});
+
+test('the provider picker shows only on the tabs that belong to one provider', async () => {
+    const { cfg, page } = await roundTrip(fixture());
+    for (const [tab, shown] of [['dashboard', false], ['provider', true], ['movies', true], ['series', true],
+        ['livetv', false], ['general', false]]) {
+        cfg.switchTab(tab);
+        assert.strictEqual(page.elements.providerBar.style.display, shown ? '' : 'none', tab);
+    }
+});
+
+test('the dashboard asks for a provider only while none is set up', async () => {
+    const empty = fixture();
+    empty.Providers = [Object.assign(empty.Providers[0], { BaseUrl: '' })];
+    const { page } = await roundTrip(empty);
+    assert.strictEqual(page.elements.emptyStateCard.style.display, '');
+
+    const configured = await roundTrip(fixture());
+    assert.strictEqual(configured.page.elements.emptyStateCard.style.display, 'none');
+});
+
+test('the delete question names the saved provider and folder, and what is lost', async () => {
+    const { cfg, page } = await roundTrip(fixture());
+    const saved = fixture().Providers[0];
+    let message = cfg.cleanConfirmMessage('Series', saved);
+    assert.match(message, /"Provider 1 name"/);
+    assert.match(message, /\/media\/lib1\/Series\?/);
+    assert.match(message, /watched status/);
+    assert.doesNotMatch(message, /not saved/);
+
+    // The server deletes under the saved path, so an unsaved edit in the field must not be named
+    // as the folder that goes.
+    page.elements.txtLibraryPath.value = '/media/elsewhere';
+    message = cfg.cleanConfirmMessage('Series', saved);
+    assert.match(message, /in \/media\/lib1\/Series\?/);
+    assert.match(message, /not saved/);
+});

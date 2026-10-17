@@ -27,13 +27,18 @@ const CONFIG_HTML = fs.readFileSync(
     path.join(__dirname, '..', '..',
         'Jellyfin.Xtream.Library', 'Configuration', 'Web', 'config.html'),
     'utf8');
+const CONFIG_JS = fs.readFileSync(
+    path.join(__dirname, '..', '..',
+        'Jellyfin.Xtream.Library', 'Configuration', 'Web', 'config.js'),
+    'utf8');
 
-test('Native Tuner description tells users to add the M3U URL as an M3U Tuner, not HDHomeRun', () => {
+test('the M3U tuner choice tells users to add an M3U Tuner, not HDHomeRun', () => {
     // The old wording paired "manual HDHomeRun tuner" with the M3U URL, which fails because
-    // Jellyfin's HDHomeRun type expects an HDHomeRun device or its discovery JSON.
+    // Jellyfin's HDHomeRun type expects an HDHomeRun device or its discovery JSON. Since the tuner
+    // became a choice, this text is the hint config.js shows for "My own M3U tuner".
     assert.match(
-        CONFIG_HTML,
-        /manual\s*<strong>\s*M3U Tuner\s*<\/strong>\s*\(not HDHomeRun\)/i,
+        CONFIG_JS,
+        /<strong>M3U Tuner<\/strong> \(not HDHomeRun\)/,
         'expected the M3U URL to be added as an M3U Tuner, not an HDHomeRun tuner');
 });
 
@@ -47,18 +52,17 @@ test('Native Tuner description no longer claims the tuner is hidden from the Das
         'old text claimed the plugin tuner is hidden, but it is registered as an ITunerHost');
 });
 
-test('Native Tuner description says the plugin lists itself under Tuner Devices', () => {
+test('the native tuner choice says the plugin lists itself under Tuner Devices', () => {
     // Jellyfin shows Live TV only once a tuner is listed under Tuner Devices (GitHub #152). The
-    // plugin adds that entry itself when Live TV and Native Tuner are on, so the text has to say
-    // both are needed, and that a second entry added by hand is not.
+    // plugin adds that entry itself, so the hint has to say so, and that a second entry added by
+    // hand is not needed. The choice is only shown while Enable Live TV is on.
     assert.match(
-        CONFIG_HTML,
-        /With this and <strong>Enable Live TV<\/strong> on, the\s*plugin lists itself under Dashboard.*Tuner Devices/is,
-        'expected the help text to say the plugin adds its own tuner entry when both checkboxes are on');
-    assert.match(
-        CONFIG_HTML,
-        /do not add a second one by hand/is,
-        'expected a warning against adding a second Xtream Library entry by hand');
+        CONFIG_JS,
+        /The plugin lists itself under Dashboard &rarr; Live TV &rarr; Tuner Devices/,
+        'expected the hint to say the plugin adds its own tuner entry');
+    assert.match(CONFIG_JS, /Do not add a second one by hand/, 'expected a warning against a second entry');
+    assert.match(CONFIG_HTML, /id="liveTvDependentTop"[\s\S]*id="radTunerNative"/,
+        'expected the tuner choice inside the part that only shows with Live TV on');
 });
 
 test('Setup URLs section explains the three URLs go in three different places', () => {

@@ -288,6 +288,8 @@ var XtreamLibraryConfig = (function () {
         p.DispatcharrApiPass = document.getElementById('txtDispatcharrApiPass').value.trim();
     },
 
+    providerTabs: ['provider', 'movies', 'series'],
+
     // Tab switching
     switchTab: function (tabName) {
         document.querySelectorAll('.xtream-tab').forEach(function (tab) {
@@ -301,6 +303,13 @@ var XtreamLibraryConfig = (function () {
         var tabContent = document.getElementById('tab-' + tabName);
         if (tabContent) {
             tabContent.classList.add('active');
+        }
+
+        // Dashboard, Live TV and General are not per provider, so a provider picker there only
+        // suggests they are. The bar starts hidden in the markup, since the page opens on Dashboard.
+        var providerBar = document.getElementById('providerBar');
+        if (providerBar) {
+            providerBar.style.display = this.providerTabs.indexOf(tabName) >= 0 ? '' : 'none';
         }
 
         if (tabName === 'dashboard') {
@@ -380,6 +389,11 @@ var XtreamLibraryConfig = (function () {
             // to the point, would swallow a saved negative correction.
             document.getElementById('txtCatchupTimeShiftMinutes').value =
                 config.CatchupTimeShiftMinutes != null ? config.CatchupTimeShiftMinutes : 0;
+
+            self.updateLiveTvVisibility();
+            self.updateCatchupVisibility();
+            self.showTunerChoice();
+            self.updateEmptyState();
 
             // Update Live TV URLs
             self.updateLiveTvUrls();
@@ -476,6 +490,7 @@ var XtreamLibraryConfig = (function () {
             config.CatchupTimeShiftMinutes = isNaN(catchupShift) ? 0 : catchupShift;
 
             ApiClient.updatePluginConfiguration(self.pluginUniqueId, config).then(function () {
+                self.updateEmptyState();
                 Dashboard.processPluginConfigurationUpdateResult();
             });
         });
@@ -2014,6 +2029,66 @@ var XtreamLibraryConfig = (function () {
         }
     },
 
+    // Hiding only: a switched-off section keeps its values and saves them unchanged.
+    updateLiveTvVisibility: function () {
+        var on = document.getElementById('chkEnableLiveTv').checked;
+        ['liveTvDependentTop', 'liveTvDependentRest'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = on ? '' : 'none';
+        });
+    },
+
+    updateCatchupVisibility: function () {
+        var el = document.getElementById('catchupDependent');
+        if (el) el.style.display = document.getElementById('chkEnableCatchup').checked ? '' : 'none';
+    },
+
+    // The tuner choice is EnableNativeTuner shown as two options. Loading only reflects the saved
+    // values; nothing changes until the user picks.
+    showTunerChoice: function () {
+        var native = document.getElementById('chkEnableNativeTuner').checked;
+        document.getElementById('radTunerNative').checked = native;
+        document.getElementById('radTunerM3u').checked = !native;
+        this.updateTunerHint();
+    },
+
+    // Picking the M3U tuner turns publishing on, because that tuner reads the published playlist.
+    // Picking the native tuner leaves publishing alone: other apps may still use the playlists.
+    chooseTuner: function (choice) {
+        document.getElementById('chkEnableNativeTuner').checked = choice === 'native';
+        if (choice === 'm3u') {
+            document.getElementById('chkPublishLiveTvPlaylists').checked = true;
+        }
+        this.updateTunerHint();
+    },
+
+    updateTunerHint: function () {
+        var native = document.getElementById('chkEnableNativeTuner').checked;
+        var hint = document.getElementById('tunerChoiceHint');
+        if (hint) {
+            hint.innerHTML = native
+                ? 'The plugin lists itself under Dashboard &rarr; Live TV &rarr; Tuner Devices as <strong>Xtream '
+                    + 'Library (added by the plugin)</strong>. Do not add a second one by hand, and no M3U tuner '
+                    + 'either, or every channel appears twice. This tuner always transcodes.'
+                : 'Add an <strong>M3U Tuner</strong> (not HDHomeRun) under Dashboard &rarr; Live TV &rarr; Tuner '
+                    + 'Devices with the M3U Playlist URL below. It can stream without transcoding.';
+        }
+        var warning = document.getElementById('tunerChoiceWarning');
+        if (warning) {
+            var publish = document.getElementById('chkPublishLiveTvPlaylists').checked;
+            warning.style.display = (!native && !publish) ? '' : 'none';
+        }
+    },
+
+    hasProvider: function () {
+        return this.providers.some(function (p) { return p && p.BaseUrl; });
+    },
+
+    updateEmptyState: function () {
+        var card = document.getElementById('emptyStateCard');
+        if (card) card.style.display = this.hasProvider() ? 'none' : '';
+    },
+
     updateDispatcharrVisibility: function () {
         const enabled = document.getElementById('chkEnableDispatcharrMode').checked;
         document.getElementById('dispatcharrSettings').style.display = enabled ? 'block' : 'none';
@@ -2088,20 +2163,43 @@ var XtreamLibraryConfig = (function () {
         });
     },
 
-    cleanMovies: function () {
-        if (!confirm('Are you sure you want to delete ALL Movies content?\n\nThis action cannot be undone.')) {
-            return;
+    // Built from the saved provider, because that is what the server deletes: the folder under
+    // the saved LibraryPath. The form may hold an edit that has not been saved yet.
+    cleanConfirmMessage: function (folder, saved) {
+        var name = (saved.Name || '').trim() || ('Provider ' + (this.activeProviderIndex + 1));
+        var root = (saved.LibraryPath || '').trim().replace(/\/$/, '');
+        var message = 'Delete every ' + (folder === 'Movies' ? 'movie' : 'series') + ' file of "' + name + '" in '
+            + root + '/' + folder + '?\n\n'
+            + 'The next sync writes them again, but Jellyfin sees them as new items: watched status, '
+            + 'favourites and resume points are lost. This cannot be undone.';
+        var formRoot = document.getElementById('txtLibraryPath').value.trim().replace(/\/$/, '');
+        if (formRoot !== root) {
+            message += '\n\nThe Library Path field has a change that is not saved. This deletes the saved '
+                + 'folder named above, not ' + formRoot + '/' + folder + '.';
         }
+        return message;
+    },
 
-        this.cleanLibraryFolder('CleanMovies');
+    confirmAndClean: function (folder, endpoint) {
+        var self = this;
+        ApiClient.getPluginConfiguration(this.pluginUniqueId).then(function (config) {
+            var saved = (config.Providers || [])[self.activeProviderIndex];
+            if (!saved) {
+                Dashboard.alert('This provider has not been saved yet, so there is nothing to delete.');
+                return;
+            }
+            if (confirm(self.cleanConfirmMessage(folder, saved))) {
+                self.cleanLibraryFolder(endpoint);
+            }
+        });
+    },
+
+    cleanMovies: function () {
+        this.confirmAndClean('Movies', 'CleanMovies');
     },
 
     cleanSeries: function () {
-        if (!confirm('Are you sure you want to delete ALL Series content?\n\nThis action cannot be undone.')) {
-            return;
-        }
-
-        this.cleanLibraryFolder('CleanSeries');
+        this.confirmAndClean('Series', 'CleanSeries');
     },
 
     cleanLibraryFolder: function (endpoint) {
@@ -2718,6 +2816,44 @@ function initXtreamLibraryConfig() {
     if (chkEnableDispatcharrMode) {
         chkEnableDispatcharrMode.addEventListener('change', function () {
             XtreamLibraryConfig.updateDispatcharrVisibility();
+        });
+    }
+
+    var chkEnableLiveTv = document.getElementById('chkEnableLiveTv');
+    if (chkEnableLiveTv) {
+        chkEnableLiveTv.addEventListener('change', function () {
+            XtreamLibraryConfig.updateLiveTvVisibility();
+        });
+    }
+
+    var chkEnableCatchup = document.getElementById('chkEnableCatchup');
+    if (chkEnableCatchup) {
+        chkEnableCatchup.addEventListener('change', function () {
+            XtreamLibraryConfig.updateCatchupVisibility();
+        });
+    }
+
+    ['radTunerNative', 'radTunerM3u'].forEach(function (id) {
+        var radio = document.getElementById(id);
+        if (radio) {
+            radio.addEventListener('change', function () {
+                if (radio.checked) XtreamLibraryConfig.chooseTuner(radio.value);
+            });
+        }
+    });
+
+    var chkPublishLiveTvPlaylists = document.getElementById('chkPublishLiveTvPlaylists');
+    if (chkPublishLiveTvPlaylists) {
+        chkPublishLiveTvPlaylists.addEventListener('change', function () {
+            XtreamLibraryConfig.updateTunerHint();
+        });
+    }
+
+    var btnGoToProvider = document.getElementById('btnGoToProvider');
+    if (btnGoToProvider) {
+        btnGoToProvider.addEventListener('click', function (e) {
+            e.preventDefault();
+            XtreamLibraryConfig.switchTab('provider');
         });
     }
 

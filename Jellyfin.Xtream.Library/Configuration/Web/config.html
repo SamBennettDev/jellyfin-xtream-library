@@ -217,7 +217,7 @@
                     </div>
 
                     <!-- Provider Selector Bar -->
-                    <div id="providerBar" class="provider-bar">
+                    <div id="providerBar" class="provider-bar" style="display: none;">
                         <label for="selActiveProvider">Provider:</label>
                         <select id="selActiveProvider"></select>
                         <button is="emby-button" type="button" id="btnAddProvider" class="raised button-submit" style="padding: 4px 12px; font-size: 0.9em;">+ Add Provider</button>
@@ -236,6 +236,13 @@
 
                     <!-- Dashboard Tab -->
                     <div id="tab-dashboard" class="xtream-tab-content active" role="tabpanel" aria-labelledby="dashboard">
+                        <div id="emptyStateCard" class="dashboard-card" style="display: none; margin-bottom: 20px;">
+                            <h4>Get started</h4>
+                            <p>No provider is set up yet. Enter your Xtream server address, username and password on the
+                            Provider tab and press Save. After the first sync, add the Movies and Shows libraries in
+                            Jellyfin as described there.</p>
+                            <button is="emby-button" type="button" id="btnGoToProvider" class="raised button-submit">Set up a provider</button>
+                        </div>
                         <div class="dashboard-grid">
                             <!-- Sync Status Card -->
                             <div class="dashboard-card">
@@ -957,20 +964,24 @@
                                     Enable M3U and EPG endpoints for Jellyfin's Live TV tuner.
                                 </div>
                             </div>
-                            <div class="checkboxContainer checkboxContainer-withDescription">
-                                <label class="emby-checkbox-label">
-                                    <input is="emby-checkbox" type="checkbox" id="chkEnableNativeTuner" name="EnableNativeTuner" />
-                                    <span>Enable Native Tuner (faster channel switching)</span>
+                            <div id="liveTvDependentTop">
+                            <div class="inputContainer">
+                                <div class="fieldDescription" style="margin-bottom: 8px;">How does Jellyfin get the channels?</div>
+                                <label class="emby-radio-label" style="display: block; margin-bottom: 4px;">
+                                    <input type="radio" is="emby-radio" name="TunerChoice" id="radTunerNative" value="native" />
+                                    <span>Native tuner (recommended)</span>
                                 </label>
-                                <div class="fieldDescription checkboxFieldDescription">
-                                    Hands channels to Jellyfin directly: faster channel switching, and no playlist with
-                                    your password has to be published. With this and <strong>Enable Live TV</strong> on, the
-                                    plugin lists itself under Dashboard &rarr; Live TV &rarr; Tuner Devices as
-                                    <strong>Xtream Library (added by the plugin)</strong>; do not add a second one by hand.
-                                    <br /><br />
-                                    Use either this or a manual <strong>M3U Tuner</strong> (not HDHomeRun) with the playlist URL below, not
-                                    both, or every channel appears twice. The native tuner transcodes; the M3U tuner can
-                                    stream without transcoding.
+                                <label class="emby-radio-label" style="display: block;">
+                                    <input type="radio" is="emby-radio" name="TunerChoice" id="radTunerM3u" value="m3u" />
+                                    <span>My own M3U tuner</span>
+                                </label>
+                                <div class="fieldDescription" id="tunerChoiceHint" style="margin-top: 8px;"></div>
+                                <div class="fieldDescription" id="tunerChoiceWarning" style="display: none; margin-top: 8px; color: #ff6b6b;">
+                                    The M3U tuner reads the playlist, so <strong>Publish Playlists</strong> under Setup URLs has to be on.
+                                </div>
+                                <!-- Holds EnableNativeTuner; the two choices above set it. -->
+                                <div style="display: none;">
+                                    <input is="emby-checkbox" type="checkbox" id="chkEnableNativeTuner" name="EnableNativeTuner" />
                                 </div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1001,8 +1012,10 @@
                                     Include channels marked as adult content.
                                 </div>
                             </div>
+                            </div>
                         </div>
 
+                        <div id="liveTvDependentRest">
                         <div class="verticalSection">
                             <h3 class="sectionTitle">Live TV Channels</h3>
 
@@ -1130,6 +1143,7 @@
                                     Only channels with tv_archive=1 on the provider support this feature.
                                 </div>
                             </div>
+                            <div id="catchupDependent">
                             <div class="inputContainer">
                                 <label class="inputLabel inputLabelUnfocused" for="txtCatchupDays">Catch-up Days</label>
                                 <input is="emby-input" type="number" id="txtCatchupDays" name="CatchupDays"
@@ -1196,6 +1210,7 @@
                                     correction for when the provider answers wrongly. Use 60 to move an hour later,
                                     -60 an hour earlier.
                                 </div>
+                            </div>
                             </div>
                             </div>
                         </div>
@@ -1313,6 +1328,7 @@
                                     </div>
                                 </div>
                             </details>
+                        </div>
                         </div>
                     </div>
 

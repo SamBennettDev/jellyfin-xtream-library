@@ -160,7 +160,7 @@ For automatic TMDb/TVDb ID lookup:
 2. Enable **Live TV**
 3. Click **Load Categories** and select the Live TV categories you want
    - Optionally, expand any category with the ▸ toggle to enable or disable individual channels (all enabled by default). After editing per-channel selections, hit **Refresh Live TV cache** for the M3U/EPG to pick up the change.
-4. Enable **Native Tuner** to register as a Jellyfin tuner (recommended)
+4. Under **How does Jellyfin get the channels?** keep **Native tuner (recommended)**; the plugin then lists itself under Tuner Devices
 5. Enable **EPG** for programme guide data (fetches XMLTV automatically)
 6. Optionally enable **Catchup** for timeshift replay support
 7. Click **Save**
@@ -315,7 +315,7 @@ Xtream password.**
 
 - **Do not expose the plugin's endpoints to the open internet.** If Jellyfin itself is public,
   restrict `/XtreamLibrary/` at your reverse proxy to the addresses that actually need it.
-- **Prefer the native tuner over the M3U tuner.** With Enable Native Tuner the plugin hands
+- **Prefer the native tuner over the M3U tuner.** With the native tuner chosen the plugin hands
   channels to Jellyfin internally and never publishes a playlist, so no credential-bearing URL is
   served to an anonymous caller.
 - **Leave Publish Playlists off unless something reads the playlists.** `LiveTv.m3u` and
