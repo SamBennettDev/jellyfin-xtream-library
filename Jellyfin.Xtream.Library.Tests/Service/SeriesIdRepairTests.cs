@@ -278,7 +278,6 @@ public class SeriesIdRepairTests : IDisposable
             new Mock<ILibraryManager>().Object,
             new Mock<IMetadataLookupService>().Object,
             new SnapshotService(appPaths.Object, NullLogger<SnapshotService>.Instance),
-            new DeltaCalculator(NullLogger<DeltaCalculator>.Instance),
             new LiveTvService(_client.Object, new Mock<IDispatcharrClient>().Object, appPaths.Object, host.Object, NullLogger<LiveTvService>.Instance),
             appPaths.Object,
             NullLogger<StrmSyncService>.Instance);

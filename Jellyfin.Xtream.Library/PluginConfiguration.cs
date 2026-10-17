@@ -438,9 +438,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the legacy full sync interval days. Migrated to Providers[0].</summary>
     public int FullSyncIntervalDays { get; set; } = 7;
 
-    /// <summary>Gets or sets the legacy full sync change threshold. Migrated to Providers[0].</summary>
-    public double FullSyncChangeThreshold { get; set; } = 0.50;
-
     /// <summary>Gets or sets the legacy request delay ms. Migrated to Providers[0].</summary>
     public int RequestDelayMs { get; set; } = 50;
 

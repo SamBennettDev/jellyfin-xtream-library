@@ -48,7 +48,6 @@ public class StrmSyncServiceDispatcharrModeTests
         var appPathsMock = new Mock<IServerApplicationPaths>();
         appPathsMock.Setup(p => p.DataPath).Returns("/tmp");
         var snapshotService = new SnapshotService(appPathsMock.Object, NullLogger<SnapshotService>.Instance);
-        var deltaCalculator = new DeltaCalculator(NullLogger<DeltaCalculator>.Instance);
 
         var appHostMock = new Mock<IServerApplicationHost>();
         appHostMock.Setup(h => h.GetApiUrlForLocalAccess(It.IsAny<System.Net.IPAddress>(), It.IsAny<bool>()))
@@ -61,7 +60,6 @@ public class StrmSyncServiceDispatcharrModeTests
             new Mock<ILibraryManager>().Object,
             new Mock<IMetadataLookupService>().Object,
             snapshotService,
-            deltaCalculator,
             liveTvService,
             appPathsMock.Object,
             NullLogger<StrmSyncService>.Instance);

@@ -214,48 +214,6 @@ public class SnapshotMetadata
 }
 
 /// <summary>
-/// Represents the delta between two content snapshots.
-/// Contains lists of new, modified, and removed items.
-/// </summary>
-public class SyncDelta
-{
-    /// <summary>
-    /// Gets or sets movies that are new since the last snapshot.
-    /// </summary>
-    public List<Client.Models.StreamInfo> NewMovies { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets movies whose metadata has changed since the last snapshot.
-    /// </summary>
-    public List<Client.Models.StreamInfo> ModifiedMovies { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets stream IDs of movies that have been removed from the provider.
-    /// </summary>
-    public List<int> RemovedMovieIds { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets series that are new since the last snapshot.
-    /// </summary>
-    public List<Client.Models.Series> NewSeries { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets series whose metadata has changed since the last snapshot.
-    /// </summary>
-    public List<Client.Models.Series> ModifiedSeries { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets series IDs of series that have been removed from the provider.
-    /// </summary>
-    public List<int> RemovedSeriesIds { get; set; } = new();
-
-    /// <summary>
-    /// Gets or sets statistics about the delta.
-    /// </summary>
-    public DeltaStatistics Stats { get; set; } = new();
-}
-
-/// <summary>
 /// Statistical information about a sync delta.
 /// </summary>
 public class DeltaStatistics

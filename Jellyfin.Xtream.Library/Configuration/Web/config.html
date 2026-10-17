@@ -539,7 +539,7 @@
                                            min="1" max="10" step="1" />
                                     <div class="fieldDescription">
                                         Number of parallel API requests during sync (1-10). Lower values reduce rate limiting (429 errors)
-                                        from providers. Default: 3.
+                                        from providers. Default: 10.
                                     </div>
                                 </div>
                                 <div class="inputContainer">
@@ -548,7 +548,7 @@
                                            min="0" max="100" step="1" />
                                     <div class="fieldDescription">
                                         Number of categories to process per batch during sync (1-100). Lower values reduce memory
-                                        usage for large libraries. Set to 0 to disable batching. Default: 10.
+                                        usage for large libraries. Set to 0 to disable batching. Default: 25.
                                     </div>
                                 </div>
                                 <div class="inputContainer">
@@ -614,15 +614,6 @@
                                            min="1" max="30" step="1" />
                                     <div class="fieldDescription">
                                         Force a full sync every N days to ensure consistency (1-30). Default: 7.
-                                    </div>
-                                </div>
-                                <div class="inputContainer">
-                                    <label class="inputLabel inputLabelUnfocused" for="txtFullSyncChangeThreshold">Change Threshold (%)</label>
-                                    <input is="emby-input" type="number" id="txtFullSyncChangeThreshold" name="FullSyncChangeThreshold"
-                                           min="0" max="100" step="5" />
-                                    <div class="fieldDescription">
-                                        If more than this percentage of content changed, fall back to full sync
-                                        as a safety measure (0-100%). Default: 50%.
                                     </div>
                                 </div>
 
@@ -995,7 +986,7 @@
                                     <option value="m3u8">HLS (use if TS doesn't work with your provider)</option>
                                 </select>
                                 <div class="fieldDescription">
-                                    Output format for live streams. MPEG-TS enables direct streaming with no transcoding. Use HLS only if your provider does not support TS.
+                                    Output format for live streams. MPEG-TS lets the M3U tuner stream without transcoding (the native tuner transcodes either way, see above). Use HLS only if your provider does not support TS.
                                 </div>
                             </div>
                             <div class="checkboxContainer checkboxContainer-withDescription">
@@ -1248,7 +1239,7 @@
                                 <br>
                                 <strong>EPG (XMLTV) URL</strong>: Dashboard &rarr; Live TV &rarr; TV Guide Data Providers &rarr; Add &rarr; XMLTV. This is a separate screen, not part of the tuner dialog.
                                 <br>
-                                <strong>Catch-up M3U URL</strong>: not consumed by Jellyfin itself. Jellyfin's Live TV has no catch-up / timeshift concept. This URL is for catch-up-aware IPTV clients (e.g. Tivimate, XC-VM clients), and is only served while <strong>Publish Playlists</strong> below is on; the main M3U above already inlines the catch-up attributes (<code>catchup</code>, <code>catchup-days</code>, <code>catchup-source</code>) on each channel that supports archive.
+                                <strong>Catch-up M3U URL</strong>: not consumed by Jellyfin itself. Jellyfin's Live TV has no catch-up / timeshift concept. This URL is for catch-up-aware IPTV clients (e.g. Tivimate, XC-VM clients), and is only served while <strong>Publish Playlists</strong> below is on; the main M3U above already carries the catch-up attributes (<code>catchup</code>, <code>catchup-days</code>, <code>catchup-source</code>) on each channel that supports archive, while <strong>Enable Catch-up</strong> is on. With Dispatcharr they are left out unless <strong>Put the catch-up template in the playlist</strong> above is on.
                                 <br><br>
                                 <strong>Do not also enable the Native Tuner option above</strong>. Adding the M3U URL here as a manual tuner while the native tuner is active causes every channel to appear twice in the Live TV Guide.
                                 <br /><br />
