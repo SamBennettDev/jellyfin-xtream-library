@@ -304,7 +304,11 @@ public class XtreamTunerHost : ITunerHost
     private static MediaSourceInfo CreateMediaSourceInfo(string channelId, string streamUrl, StreamStatsInfo? stats, bool isHls, ILogger logger)
     {
         var sourceId = "xtream_live_" + channelId;
-        bool hasStats = stats?.VideoCodec != null;
+
+        // Stats only with Stream Format TS. A source that skips the probe keeps the container named
+        // here, and Dispatcharr serves MPEG-TS whatever the extension, so with HLS selected Jellyfin
+        // would be told "hls" for a TS stream (homelab-ops #550). With probing it finds out itself.
+        bool hasStats = stats?.VideoCodec != null && !isHls;
 
         var mediaSource = new MediaSourceInfo
         {
@@ -351,14 +355,19 @@ public class XtreamTunerHost : ITunerHost
             var videoStream = new MediaStream
             {
                 Type = MediaStreamType.Video,
-                Index = 0,
+
+                // -1, as Jellyfin's own M3U tuner leaves probed streams: Jellyfin then passes no
+                // -map and ffmpeg picks the video and audio itself. A real index is used verbatim
+                // as -map 0:N, and Dispatcharr's MPEG-TS puts a data stream at 0:0, so index 0/1
+                // mapped data and video and dropped the audio (homelab-ops #550).
+                Index = -1,
                 Codec = videoCodec,
                 Width = width > 0 ? width : null,
                 Height = height > 0 ? height : null,
                 IsInterlaced = false,
                 RealFrameRate = stats.SourceFps.HasValue ? (float)stats.SourceFps.Value : null,
                 AverageFrameRate = stats.SourceFps.HasValue ? (float)stats.SourceFps.Value : null,
-                BitRate = stats.Bitrate.HasValue ? stats.Bitrate.Value * 1000 : null,
+                BitRate = stats.Bitrate.HasValue ? (int)Math.Round(stats.Bitrate.Value * 1000) : null,
             };
             mediaStreams.Add(videoStream);
 
@@ -368,7 +377,7 @@ public class XtreamTunerHost : ITunerHost
             mediaStreams.Add(new MediaStream
             {
                 Type = MediaStreamType.Audio,
-                Index = 1,
+                Index = -1,
             });
 
             mediaSource.MediaStreams = mediaStreams;

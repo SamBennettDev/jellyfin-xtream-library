@@ -389,8 +389,35 @@ public class XtreamTunerHostTests : IDisposable
 
         // Audio stream has no codec — forces transcode to avoid AAC ADTS→fMP4 copy issue
         var audio = source.MediaStreams.First(s => s.Type == MediaStreamType.Audio);
-        audio.Index.Should().Be(1);
+        audio.Index.Should().Be(-1);
         audio.Codec.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetChannelStreamMediaSources_WithStatsButHls_StillProbes()
+    {
+        // A source that skips the probe keeps the container named by the plugin. Dispatcharr serves
+        // MPEG-TS whatever the extension, so with HLS selected the stats must not be used, or
+        // Jellyfin is told "hls" for a TS stream (homelab-ops #550).
+        var config = Plugin.Instance.Configuration;
+        config.EnableLiveTv = true;
+        config.EnableNativeTuner = true;
+        config.EnableChannelNameCleaning = false;
+        config.LiveTvOutputFormat = "m3u8";
+
+        _mockClient
+            .Setup(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LiveStreamInfo>
+            {
+                new() { StreamId = 100, Name = "Test Channel", Num = 1, StreamStats = new StreamStatsInfo { VideoCodec = "h264" } },
+            });
+
+        await _tunerHost.GetChannels(false, CancellationToken.None);
+        var source = (await _tunerHost.GetChannelStreamMediaSources("xtream_100", CancellationToken.None))[0];
+
+        source.SupportsProbing.Should().BeTrue();
+        source.RequiresOpening.Should().BeTrue();
+        source.MediaStreams.Should().BeNullOrEmpty();
     }
 
     [Fact]
@@ -759,6 +786,34 @@ public class XtreamTunerHostTests : IDisposable
     }
 
     #endregion
+
+    [Fact]
+    public void DispatcharrStats_FillChannelsWithoutStats_AndKeepTheProvidersOwn()
+    {
+        var listing = new List<DispatcharrChannel>
+        {
+            new()
+            {
+                Id = 100, Uuid = "u100", Streams = [new DispatcharrChannelSource { StreamId = 900, StreamStatsJson = Newtonsoft.Json.Linq.JToken.Parse("""{"video_codec":"h264"}""") }],
+            },
+            new()
+            {
+                Id = 200, Uuid = "u200", Streams = [new DispatcharrChannelSource { StreamId = 901, StreamStatsJson = Newtonsoft.Json.Linq.JToken.Parse("""{"video_codec":"hevc"}""") }],
+            },
+        };
+        var channels = new List<LiveStreamInfo>
+        {
+            new() { StreamId = 100 },
+            new() { StreamId = 200, StreamStats = new StreamStatsInfo { VideoCodec = "mpeg2video" } },
+            new() { StreamId = 300 },
+        };
+
+        _liveTvService.StampDispatcharrStats(listing, channels);
+
+        channels[0].StreamStats!.VideoCodec.Should().Be("h264");
+        channels[1].StreamStats!.VideoCodec.Should().Be("mpeg2video");
+        channels[2].StreamStats.Should().BeNull();
+    }
 
     #region Startup warm-up (homelab-ops #550)
 

@@ -127,4 +127,74 @@ public class DispatcharrChannelMapTests
         DispatcharrChannelMap.BuildProxyStreamUrl("http://host/dispatcharr", "abc-123")
             .Should().Be("http://host/dispatcharr/proxy/ts/stream/abc-123");
     }
+
+    // homelab-ops #550: Dispatcharr's Xtream emulation never sends stream_stats, but its channel
+    // listing does, per stream.
+    private static DispatcharrChannel ChannelWithStats(int id, params (int StreamId, string StatsJson)[] streams) => new()
+    {
+        Id = id,
+        Uuid = "uuid-" + id,
+        Name = $"Channel {id}",
+        Streams = new List<DispatcharrChannelSource>(System.Linq.Enumerable.Select(streams, s => new DispatcharrChannelSource
+        {
+            StreamId = s.StreamId,
+            StreamStatsJson = Newtonsoft.Json.Linq.JToken.Parse(s.StatsJson),
+        })),
+    };
+
+    [Fact]
+    public void StatsUnderTheChannelIdAreThoseOfItsFirstStream()
+    {
+        var stats = DispatcharrChannelMap.BuildStats([ChannelWithStats(
+            7,
+            (500, """{"video_codec":"h264","resolution":"1024x576","source_fps":25,"ffmpeg_output_bitrate":2500.5}"""),
+            (501, """{"video_codec":"hevc"}"""))]);
+
+        stats[7].VideoCodec.Should().Be("h264");
+        stats[7].Bitrate.Should().Be(2500.5);
+        stats[500].VideoCodec.Should().Be("h264");
+        stats[501].VideoCodec.Should().Be("hevc");
+    }
+
+    [Fact]
+    public void AChannelWhoseFirstStreamHasNoStatsGetsNoneFromALaterStream()
+    {
+        // The later stream is a failover that may never play; its codec says nothing about the first.
+        var stats = DispatcharrChannelMap.BuildStats([ChannelWithStats(7, (500, "{}"), (501, """{"video_codec":"hevc"}"""))]);
+
+        stats.Should().NotContainKey(7);
+        stats.Should().NotContainKey(500);
+        stats[501].VideoCodec.Should().Be("hevc");
+    }
+
+    [Fact]
+    public void UnreadableStatsLoseOnlyThatStream()
+    {
+        var stats = DispatcharrChannelMap.BuildStats([
+            ChannelWithStats(7, (500, """{"video_codec":"h264","ffmpeg_output_bitrate":"fast"}""")),
+            ChannelWithStats(8, (600, "\"not an object\"")),
+            ChannelWithStats(9, (700, """{"video_codec":"h264"}""")),
+        ]);
+
+        stats.Should().NotContainKey(7);
+        stats.Should().NotContainKey(8);
+        stats[9].VideoCodec.Should().Be("h264");
+    }
+
+    [Fact]
+    public void AListingWithOddStatsStillDeserializes()
+    {
+        // The listing also carries the uuids that keep the password out of the Live TV URLs, so
+        // stats of an unexpected shape must not fail it.
+        const string Json = """
+            [{"id":7,"uuid":"u7","name":"A","streams":[{"id":1,"stream_id":500,"stream_stats":{"ffmpeg_output_bitrate":"fast"}}]},
+             {"id":8,"uuid":"u8","name":"B","streams":[{"id":2,"stream_id":600,"stream_stats":null}]},
+             {"id":9,"uuid":"u9","name":"C","streams":[{"id":3,"stream_id":700,"stream_stats":[1,2]}]}]
+            """;
+
+        var listing = Newtonsoft.Json.JsonConvert.DeserializeObject<List<DispatcharrChannel>>(Json);
+
+        DispatcharrChannelMap.Build(listing).Should().HaveCount(6);
+        DispatcharrChannelMap.BuildStats(listing).Should().BeEmpty();
+    }
 }

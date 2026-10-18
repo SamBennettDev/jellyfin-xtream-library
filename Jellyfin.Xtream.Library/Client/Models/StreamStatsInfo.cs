@@ -35,6 +35,8 @@ public class StreamStatsInfo
     [JsonProperty("source_fps")]
     public double? SourceFps { get; set; }
 
+    // In kbit/s. A double because Dispatcharr's proxy stores it rounded to one decimal; an int here
+    // would fail the whole stats object on the first fractional value.
     [JsonProperty("ffmpeg_output_bitrate")]
-    public int? Bitrate { get; set; }
+    public double? Bitrate { get; set; }
 }

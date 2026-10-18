@@ -760,6 +760,38 @@ public class LiveTvService : IDisposable
             "Dispatcharr matched {Matched} of {Total} Live TV channels; the rest keep the credentialed URL",
             matched,
             channels.Count);
+
+        StampDispatcharrStats(listing, channels);
+    }
+
+    /// <summary>
+    /// Gives each channel that has none the stream stats Dispatcharr's proxy recorded, so the
+    /// native tuner can describe the stream itself and Jellyfin skips its probe: a fixed 3 s wait
+    /// plus the probe, and Dispatcharr tearing the channel down between probe and playback
+    /// (homelab-ops #550).
+    /// <para>
+    /// The tuner only uses them with Stream Format TS; see CreateMediaSourceInfo.
+    /// </para>
+    /// </summary>
+    /// <param name="listing">Dispatcharr's channel listing.</param>
+    /// <param name="channels">Channels to stamp, modified in place.</param>
+    internal void StampDispatcharrStats(IEnumerable<DispatcharrChannel>? listing, List<LiveStreamInfo> channels)
+    {
+        var stats = DispatcharrChannelMap.BuildStats(listing);
+        int stamped = 0;
+        foreach (var channel in channels)
+        {
+            if (channel.StreamStats?.VideoCodec == null && stats.TryGetValue(channel.StreamId, out var found))
+            {
+                channel.StreamStats = found;
+                stamped++;
+            }
+        }
+
+        _logger.LogInformation(
+            "Dispatcharr had stream stats for {Stamped} of {Total} Live TV channels",
+            stamped,
+            channels.Count);
     }
 
     private async Task<List<LiveStreamInfo>> GetFilteredChannelsForProviderAsync(
