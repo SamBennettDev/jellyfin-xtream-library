@@ -110,6 +110,18 @@ public class StreamUrlRedactorTests
         handler.Requests.Should().Be(0);
     }
 
+    [Fact]
+    public void LiveStream_IsShared()
+    {
+        // Every open of a channel gets the same live stream id; unshared, stopping one session
+        // closed the next one too (iOS -1100, homelab-ops #550).
+        using var client = new HttpClient(new StatusHandler(HttpStatusCode.OK));
+        using var stream = new XtreamLiveStream(new MediaSourceInfo { Id = "1", Path = "http://host/1.ts" }, client, new ListLogger(new List<string>()));
+
+        stream.EnableStreamSharing.Should().BeTrue();
+        stream.ConsumerCount.Should().Be(1, "the client that opened it is its first consumer");
+    }
+
     private sealed class StatusHandler(HttpStatusCode status) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

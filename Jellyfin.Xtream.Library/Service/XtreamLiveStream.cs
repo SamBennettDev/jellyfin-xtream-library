@@ -52,7 +52,13 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     }
 
     /// <inheritdoc />
-    public int ConsumerCount { get; set; }
+    /// <remarks>
+    /// Starts at 1, for the client that opened it, as Jellyfin's own tuner streams do. Jellyfin
+    /// only increments it when another client reuses the stream and closes the stream when a stop
+    /// brings it to 0; starting at 0, the first stop of two sessions closed both
+    /// (homelab-ops #550, logged as "consumer count is now -1" before sharing was on).
+    /// </remarks>
+    public int ConsumerCount { get; set; } = 1;
 
     /// <inheritdoc />
     public string OriginalStreamId { get; set; }
@@ -61,7 +67,15 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     public string TunerHostId { get; }
 
     /// <inheritdoc />
-    public bool EnableStreamSharing => false;
+    /// <remarks>
+    /// Shared, as Jellyfin's own M3U tuner does. Jellyfin names a live stream after its source, so
+    /// every open of a channel gets the same id. Unshared, a client that opens a channel twice
+    /// and then stops the first session (the iOS app does this) closed the second one as well:
+    /// ffmpeg stopped, the playlist was deleted, and the app failed with -1100. Shared, the second
+    /// open reuses the stream and only the consumer count changes. Safe because <see cref="Open"/>
+    /// connects nothing (homelab-ops #550).
+    /// </remarks>
+    public bool EnableStreamSharing => true;
 
     /// <inheritdoc />
     public MediaSourceInfo MediaSource { get; set; }
