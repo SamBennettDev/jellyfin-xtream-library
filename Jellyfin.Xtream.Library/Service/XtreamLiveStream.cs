@@ -70,7 +70,20 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     public string UniqueId { get; }
 
     /// <inheritdoc />
-    public async Task Open(CancellationToken openCancellationToken)
+    /// <remarks>
+    /// Connects nothing (homelab-ops #550). ffmpeg and the probe open the URL themselves, so a
+    /// connection made here was only ever an extra Dispatcharr client that nobody read. Opening
+    /// still matters: it gives Jellyfin a live stream id at once, which is what lets it start
+    /// ffmpeg straight away (Emby's plugin does the same). The connection is made on first
+    /// <see cref="GetStream"/>, for callers that do read through the plugin.
+    /// </remarks>
+    public Task Open(CancellationToken openCancellationToken)
+    {
+        _logger.LogDebug("Live stream {UniqueId} opened; connecting on first read", UniqueId);
+        return Task.CompletedTask;
+    }
+
+    private async Task ConnectAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Opening stream: {Url}", StreamUrlRedactor.Redact(MediaSource.Path));
         try
@@ -78,9 +91,9 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
             _response = await _httpClient.GetAsync(
                 MediaSource.Path,
                 HttpCompletionOption.ResponseHeadersRead,
-                openCancellationToken).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             _response.EnsureSuccessStatusCode();
-            _stream = await _response.Content.ReadAsStreamAsync(openCancellationToken).ConfigureAwait(false);
+            _stream = await _response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Stream opened successfully (HTTP {StatusCode})", (int)_response.StatusCode);
         }
         catch (HttpRequestException ex)
@@ -105,7 +118,13 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     /// <inheritdoc />
     public Stream GetStream()
     {
-        return _stream ?? throw new InvalidOperationException("Stream not opened. Call Open() first.");
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_stream is null)
+        {
+            ConnectAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        return _stream!;
     }
 
     /// <inheritdoc />

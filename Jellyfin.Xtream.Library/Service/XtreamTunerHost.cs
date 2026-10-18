@@ -321,8 +321,10 @@ public class XtreamTunerHost : ITunerHost
             // GitHub #107. Jellyfin only probes a live source while opening it, and PlaybackInfo
             // only opens one that asks to be opened (MediaInfoController:223, inside the
             // AutoOpenLiveStream branch). Without this the probe below is unreachable no matter
-            // what SupportsProbing says. A source that came with stats needs neither.
-            RequiresOpening = !hasStats,
+            // what SupportsProbing says. A source with stats is opened too: opening costs nothing
+            // (XtreamLiveStream.Open connects lazily) and a source that was never opened made
+            // Jellyfin wait about 1.7 s before starting ffmpeg (homelab-ops #550).
+            RequiresOpening = true,
             IsRemote = true,
             IsInfiniteStream = true,
             SupportsDirectPlay = false,

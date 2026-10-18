@@ -372,9 +372,9 @@ public class XtreamTunerHostTests : IDisposable
         var source = result[0];
         source.SupportsProbing.Should().BeFalse();
 
-        // A source that arrived with stats has nothing to find out, so it should not pay for an
-        // open either (GitHub #107).
-        source.RequiresOpening.Should().BeFalse();
+        // Opened anyway: opening connects nothing, and an unopened source made Jellyfin wait
+        // about 1.7 s before starting ffmpeg (homelab-ops #550).
+        source.RequiresOpening.Should().BeTrue();
         source.AnalyzeDurationMs.Should().Be(0);
 
         source.MediaStreams.Should().HaveCount(2);

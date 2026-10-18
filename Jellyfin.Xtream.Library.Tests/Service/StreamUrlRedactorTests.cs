@@ -84,19 +84,41 @@ public class StreamUrlRedactorTests
         var source = new MediaSourceInfo { Id = "1", Path = "http://host:8080/live/alice/opensesame/123.ts" };
         using var stream = new XtreamLiveStream(source, client, new ListLogger(log));
 
-        var open = () => stream.Open(CancellationToken.None);
+        // Open connects nothing since homelab-ops #550; the failure surfaces on the first read.
+        await stream.Open(CancellationToken.None);
+        var read = () => stream.GetStream();
 
-        await open.Should().ThrowAsync<HttpRequestException>();
+        read.Should().Throw<HttpRequestException>();
         log.Should().NotBeEmpty();
         log.Should().OnlyContain(line => !line.Contains("alice", StringComparison.Ordinal)
             && !line.Contains("opensesame", StringComparison.Ordinal));
         log.Should().Contain(line => line.Contains("/live/***/***/123.ts", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task LiveStreamOpen_DoesNotConnect()
+    {
+        // ffmpeg and the probe open the URL themselves; a connection made in Open was an extra
+        // Dispatcharr client nobody read (homelab-ops #550).
+        var handler = new StatusHandler(HttpStatusCode.OK);
+        using var client = new HttpClient(handler);
+        var source = new MediaSourceInfo { Id = "1", Path = "http://host:8080/live/u/p/123.ts" };
+        using var stream = new XtreamLiveStream(source, client, new ListLogger(new List<string>()));
+
+        await stream.Open(CancellationToken.None);
+
+        handler.Requests.Should().Be(0);
+    }
+
     private sealed class StatusHandler(HttpStatusCode status) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(status));
+        {
+            Requests++;
+            return Task.FromResult(new HttpResponseMessage(status));
+        }
+
+        public int Requests { get; private set; }
     }
 
     private sealed class ListLogger(List<string> sink) : ILogger
