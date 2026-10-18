@@ -55,7 +55,7 @@ public class XtreamTunerHost : ITunerHost
     private readonly ILogger<XtreamTunerHost> _logger;
     private volatile Dictionary<string, string> _channelNumberToChannelId = new();
     private volatile Dictionary<string, StreamStatsInfo> _streamStats = new();
-    private volatile Dictionary<string, string> _proxyStreamUrls = new();
+    private volatile Dictionary<string, string> _dispatcharrUuids = new();
     private List<ChannelInfo>? _cachedChannels;
     private DateTime _cacheTime = DateTime.MinValue;
     private bool _cachedNumberByCategory;
@@ -115,7 +115,8 @@ public class XtreamTunerHost : ITunerHost
         int stride = ChannelNumbering.ComputeStride(channels);
         var newMap = new Dictionary<string, string>(channels.Count);
         var newStats = new Dictionary<string, StreamStatsInfo>(channels.Count);
-        var newProxyUrls = new Dictionary<string, string>(channels.Count);
+        var newUuids = new Dictionary<string, string>(channels.Count);
+        int proxyCount = 0;
         int statsCount = 0;
 
         var result = new List<ChannelInfo>(channels.Count);
@@ -142,10 +143,13 @@ public class XtreamTunerHost : ITunerHost
                 statsCount++;
             }
 
-            var proxyUrl = BuildProxyStreamUrl(config, channel);
-            if (proxyUrl != null)
+            if (!string.IsNullOrEmpty(channel.DispatcharrUuid))
             {
-                newProxyUrls[channelId] = proxyUrl;
+                newUuids[channelId] = channel.DispatcharrUuid;
+                if (BuildProxyStreamUrl(config, channel) != null)
+                {
+                    proxyCount++;
+                }
             }
 
             var cleanName = ChannelNameCleaner.CleanChannelName(
@@ -172,7 +176,7 @@ public class XtreamTunerHost : ITunerHost
 
         _channelNumberToChannelId = newMap;
         _streamStats = newStats;
-        _proxyStreamUrls = newProxyUrls;
+        _dispatcharrUuids = newUuids;
         _cachedChannels = result;
         _cacheTime = DateTime.UtcNow;
         _cachedNumberByCategory = config.LiveTvNumberByCategory;
@@ -180,7 +184,7 @@ public class XtreamTunerHost : ITunerHost
             "Channel list cached with {Count} channels ({StatsCount} with stream stats, {ProxyCount} with a Dispatcharr URL without credentials)",
             result.Count,
             statsCount,
-            newProxyUrls.Count);
+            proxyCount);
 
         return result;
     }
@@ -311,7 +315,10 @@ public class XtreamTunerHost : ITunerHost
     /// </summary>
     private (string Url, bool IsHls) ResolveStreamUrl(PluginConfiguration config, int providerIndex, int streamId, string channelId)
     {
-        if (_proxyStreamUrls.TryGetValue(channelId, out var proxyUrl))
+        // Only the uuid is cached; the URL is built from the current settings, so a changed or
+        // removed Dispatcharr base URL takes effect without waiting for the channel list to reload.
+        if (_dispatcharrUuids.TryGetValue(channelId, out var uuid)
+            && BuildProxyStreamUrl(config, providerIndex, uuid) is { } proxyUrl)
         {
             return (proxyUrl, false);
         }
@@ -328,16 +335,19 @@ public class XtreamTunerHost : ITunerHost
     /// <param name="channel">The channel.</param>
     /// <returns>The URL, or null.</returns>
     internal static string? BuildProxyStreamUrl(PluginConfiguration config, LiveStreamInfo channel)
+        => BuildProxyStreamUrl(config, channel.ProviderIndex, channel.DispatcharrUuid);
+
+    private static string? BuildProxyStreamUrl(PluginConfiguration config, int providerIndex, string? uuid)
     {
-        if (string.IsNullOrEmpty(channel.DispatcharrUuid))
+        if (string.IsNullOrEmpty(uuid))
         {
             return null;
         }
 
-        var dispatcharrBase = LiveTvService.ResolveDispatcharrBaseUrl(config, channel.ProviderIndex);
+        var dispatcharrBase = LiveTvService.ResolveDispatcharrBaseUrl(config, providerIndex);
         return string.IsNullOrEmpty(dispatcharrBase)
             ? null
-            : DispatcharrChannelMap.BuildProxyStreamUrl(dispatcharrBase, channel.DispatcharrUuid);
+            : DispatcharrChannelMap.BuildProxyStreamUrl(dispatcharrBase, uuid);
     }
 
     private static string BuildStreamUrl(PluginConfiguration config, int providerIndex, int streamId)

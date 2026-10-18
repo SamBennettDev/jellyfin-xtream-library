@@ -963,6 +963,26 @@ public class XtreamTunerHostTests : IDisposable
     }
 
     [Fact]
+    public async Task GetChannelStreamMediaSources_FollowsAChangedDispatcharrBaseUrl_WithoutReloadingChannels()
+    {
+        // Only the uuid is cached, so moving Dispatcharr takes effect at the next play rather than
+        // at the next channel reload (PR #167 review).
+        var config = Plugin.Instance.Configuration;
+        config.EnableLiveTv = true;
+        config.EnableNativeTuner = true;
+        config.Providers[0].DispatcharrBaseUrl = "http://old-dispatcharr:9191";
+        _mockClient
+            .Setup(c => c.GetAllLiveStreamsAsync(It.IsAny<ConnectionInfo>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<LiveStreamInfo> { new() { StreamId = 100, Name = "Test Channel", Num = 1, DispatcharrUuid = "abc" } });
+        await _tunerHost.GetChannels(false, CancellationToken.None);
+
+        config.Providers[0].DispatcharrBaseUrl = "http://new-dispatcharr:9191";
+        var result = await _tunerHost.GetChannelStreamMediaSources("xtream_100", CancellationToken.None);
+
+        result[0].Path.Should().Be("http://new-dispatcharr:9191/proxy/ts/stream/abc");
+    }
+
+    [Fact]
     public void BuildProxyStreamUrl_WithoutUuid_ReturnsNull()
     {
         var config = new PluginConfiguration();
