@@ -188,7 +188,7 @@ public class XtreamTunerHost : ITunerHost
         _streamStats.TryGetValue(canonicalChannelId, out var stats);
         var isHls = !string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
 
-        var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, _logger);
+        var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, config, _logger);
 
         return new List<MediaSourceInfo> { mediaSource };
     }
@@ -209,7 +209,7 @@ public class XtreamTunerHost : ITunerHost
         _streamStats.TryGetValue(canonicalChannelId, out var stats);
         var isHls = !string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
 
-        var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, _logger);
+        var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, config, _logger);
 
         var httpClient = _httpClientFactory.CreateClient();
         ILiveStream liveStream = new XtreamLiveStream(mediaSource, httpClient, _logger);
@@ -301,7 +301,7 @@ public class XtreamTunerHost : ITunerHost
             : string.Create(CultureInfo.InvariantCulture, $"{ChannelIdPrefix}{providerIndex}_{streamId}");
     }
 
-    private static MediaSourceInfo CreateMediaSourceInfo(string channelId, string streamUrl, StreamStatsInfo? stats, bool isHls, ILogger logger)
+    internal static MediaSourceInfo CreateMediaSourceInfo(string channelId, string streamUrl, StreamStatsInfo? stats, bool isHls, PluginConfiguration config, ILogger logger)
     {
         var sourceId = "xtream_live_" + channelId;
 
@@ -315,7 +315,11 @@ public class XtreamTunerHost : ITunerHost
             Id = sourceId,
             Path = streamUrl,
             Protocol = MediaProtocol.Http,
-            Container = isHls ? "hls" : "mpegts",
+            // "ts", not "mpegts": Jellyfin adds -bsf:a aac_adtstoasc for copied AAC going into fMP4
+            // segments only when the source container is "ts", "aac" or "hls"
+            // (EncodingHelper.GetAudioBsfArguments). With "mpegts" a copied AAC track made ffmpeg
+            // fail on fMP4 (homelab-ops #550).
+            Container = isHls ? "hls" : "ts",
             SupportsProbing = !hasStats,
 
             // GitHub #107. Jellyfin only probes a live source while opening it, and PlaybackInfo
@@ -327,10 +331,20 @@ public class XtreamTunerHost : ITunerHost
             RequiresOpening = true,
             IsRemote = true,
             IsInfiniteStream = true,
+            // No direct play: a client that direct plays (Swiftfin with VLC) opens Path itself, so
+            // it gets the provider URL with the login in it and bypasses Jellyfin, which then
+            // cannot close the connection. On 2026-10-18 Swiftfin opened 2 to 3 connections per
+            // channel that way and the provider blocked the account with HTTP 407 (homelab-ops #550).
             SupportsDirectPlay = false,
-            SupportsDirectStream = true,
+            // No direct stream: for a live source Jellyfin's direct stream is a remux into one
+            // endless fragmented mp4, which the iOS player rejects (AVFoundation -11850, seen on
+            // RTL 5 once the audio codec was declared). Without it Jellyfin uses HLS, which still
+            // copies video and audio when the client accepts them (homelab-ops #550).
+            SupportsDirectStream = false,
             SupportsTranscoding = true,
-            AnalyzeDurationMs = hasStats ? 0 : 500,
+            // 0 leaves it to Jellyfin's FFmpeg:analyzeduration; a positive value wins over it
+            // (EncodingHelper.GetFfmpegAnalyzeDurationArg), and only for these sources.
+            AnalyzeDurationMs = hasStats ? Math.Max(0, config.LiveTvAnalyzeDurationMs) : 500,
             IgnoreDts = true,
             GenPtsInput = true,
         };
@@ -373,13 +387,18 @@ public class XtreamTunerHost : ITunerHost
             };
             mediaStreams.Add(videoStream);
 
-            // Add audio stream without codec to ensure audio is included in output.
-            // Omitting codec forces Jellyfin to transcode audio (fast) rather than copy,
-            // which avoids the AAC ADTS→fMP4 issue (missing aac_adtstoasc BSF).
+            // Without a codec Jellyfin re-encodes the audio, which avoided the AAC ADTS to fMP4
+            // problem (missing aac_adtstoasc). With LiveTvCopyAudio the codec from the stats is
+            // declared, so Jellyfin can copy it when the client accepts it (homelab-ops #550).
+            var audioCodec = config.LiveTvCopyAudio ? MapAudioCodec(stats.AudioCodec) : null;
             mediaStreams.Add(new MediaStream
             {
                 Type = MediaStreamType.Audio,
                 Index = -1,
+                Codec = audioCodec,
+                Channels = audioCodec is null ? null : stats.AudioChannels,
+                SampleRate = audioCodec is null ? null : stats.AudioSampleRate,
+                BitRate = audioCodec is null || stats.AudioBitrate is null ? null : stats.AudioBitrate * 1000,
             });
 
             mediaSource.MediaStreams = mediaStreams;
@@ -426,6 +445,24 @@ public class XtreamTunerHost : ITunerHost
         }
 
         return mediaSource;
+    }
+
+    private static string? MapAudioCodec(string? dispatcharrCodec)
+    {
+        if (string.IsNullOrWhiteSpace(dispatcharrCodec))
+        {
+            return null;
+        }
+
+        return dispatcharrCodec.ToLowerInvariant() switch
+        {
+            "aac" or "aac_latm" => "aac",
+            "ac3" or "ac-3" => "ac3",
+            "eac3" or "e-ac-3" => "eac3",
+            "mp2" or "mp2float" => "mp2",
+            "mp3" or "mp3float" => "mp3",
+            _ => null, // unknown: leave it to Jellyfin, which then re-encodes
+        };
     }
 
     private static string MapVideoCodec(string dispatcharrCodec)

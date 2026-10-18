@@ -15,6 +15,7 @@
 
 #pragma warning disable CS0618 // Legacy config fields used in test setup; Providers[0] is populated separately
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using FluentAssertions;
 using Jellyfin.Xtream.Library.Client;
@@ -295,8 +296,8 @@ public class XtreamTunerHostTests : IDisposable
         source.SupportsProbing.Should().BeTrue();
         source.IsRemote.Should().BeTrue();
         source.IsInfiniteStream.Should().BeTrue();
-        source.SupportsDirectPlay.Should().BeFalse();
-        source.SupportsDirectStream.Should().BeTrue();
+        source.SupportsDirectPlay.Should().BeFalse("no stats, nothing for a client to decide on");
+        source.SupportsDirectStream.Should().BeFalse("a live direct stream is an endless mp4 the iOS player rejects");
         source.SupportsTranscoding.Should().BeTrue();
         source.AnalyzeDurationMs.Should().Be(500);
         source.IgnoreDts.Should().BeTrue();
@@ -376,6 +377,7 @@ public class XtreamTunerHostTests : IDisposable
         // about 1.7 s before starting ffmpeg (homelab-ops #550).
         source.RequiresOpening.Should().BeTrue();
         source.AnalyzeDurationMs.Should().Be(0);
+        source.SupportsDirectPlay.Should().BeFalse("a direct-play client would open the provider URL, login included, itself");
 
         source.MediaStreams.Should().HaveCount(2);
 
@@ -814,6 +816,62 @@ public class XtreamTunerHostTests : IDisposable
         channels[1].StreamStats!.VideoCodec.Should().Be("mpeg2video");
         channels[2].StreamStats.Should().BeNull();
     }
+
+    #region Measured tuning (homelab-ops #550)
+
+    private static StreamStatsInfo Stats(string audioJson) =>
+        Newtonsoft.Json.JsonConvert.DeserializeObject<StreamStatsInfo>(
+            "{\"video_codec\":\"h264\",\"resolution\":\"1920x1080\"," + audioJson + "}")!;
+
+    [Fact]
+    public void AnalyzeDuration_ComesFromTheSetting_OnlyForSourcesWithStats()
+    {
+        var config = new PluginConfiguration { LiveTvAnalyzeDurationMs = 3000 };
+        XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats("\"audio_codec\":\"aac\""), false, config, NullLogger.Instance)
+            .AnalyzeDurationMs.Should().Be(3000);
+        XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", null, false, config, NullLogger.Instance)
+            .AnalyzeDurationMs.Should().Be(500);
+        XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats("\"audio_codec\":\"aac\""), false, new PluginConfiguration(), NullLogger.Instance)
+            .AnalyzeDurationMs.Should().Be(0);
+    }
+
+    [Fact]
+    public void ATransportStreamSourceIsNamedTs_SoJellyfinFixesCopiedAacForFmp4()
+    {
+        // EncodingHelper adds -bsf:a aac_adtstoasc only for a source container of ts, aac or hls.
+        XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats("\"audio_codec\":\"aac\""), false, new PluginConfiguration(), NullLogger.Instance)
+            .Container.Should().Be("ts");
+    }
+
+    [Theory]
+    [InlineData("\"audio_codec\":\"ac3\",\"audio_channels\":2,\"audio_sample_rate\":48000,\"audio_bitrate\":448", "ac3", 2, 48000)]
+    [InlineData("\"audio_codec\":\"aac\",\"audio_channels\":\"6\",\"audio_sample_rate\":44100.0", "aac", 6, 44100)]
+    [InlineData("\"audio_codec\":\"mp2\",\"audio_channels\":\"stereo\"", "mp2", null, null)]
+    public void CopyAudio_DeclaresTheCodecFromTheStats(string audioJson, string codec, int? channels, int? sampleRate)
+    {
+        var config = new PluginConfiguration { LiveTvCopyAudio = true };
+        var audio = XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats(audioJson), false, config, NullLogger.Instance)
+            .MediaStreams.Single(m => m.Type == MediaStreamType.Audio);
+
+        audio.Codec.Should().Be(codec);
+        audio.Channels.Should().Be(channels);
+        audio.SampleRate.Should().Be(sampleRate);
+        audio.Index.Should().Be(-1);
+    }
+
+    [Fact]
+    public void CopyAudio_LeavesUnknownCodecsAndTheDefaultToJellyfin()
+    {
+        var unknown = XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats("\"audio_codec\":\"opus\""),
+            false, new PluginConfiguration { LiveTvCopyAudio = true }, NullLogger.Instance);
+        unknown.MediaStreams.Single(m => m.Type == MediaStreamType.Audio).Codec.Should().BeNull();
+
+        var off = XtreamTunerHost.CreateMediaSourceInfo("xtream_1", "http://x/1.ts", Stats("\"audio_codec\":\"aac\""),
+            false, new PluginConfiguration(), NullLogger.Instance);
+        off.MediaStreams.Single(m => m.Type == MediaStreamType.Audio).Codec.Should().BeNull();
+    }
+
+    #endregion
 
     #region Startup warm-up (homelab-ops #550)
 
