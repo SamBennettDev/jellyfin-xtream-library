@@ -55,6 +55,7 @@ public class XtreamTunerHost : ITunerHost
     private readonly ILogger<XtreamTunerHost> _logger;
     private volatile Dictionary<string, string> _channelNumberToChannelId = new();
     private volatile Dictionary<string, StreamStatsInfo> _streamStats = new();
+    private volatile Dictionary<string, string> _proxyStreamUrls = new();
     private List<ChannelInfo>? _cachedChannels;
     private DateTime _cacheTime = DateTime.MinValue;
     private bool _cachedNumberByCategory;
@@ -114,6 +115,7 @@ public class XtreamTunerHost : ITunerHost
         int stride = ChannelNumbering.ComputeStride(channels);
         var newMap = new Dictionary<string, string>(channels.Count);
         var newStats = new Dictionary<string, StreamStatsInfo>(channels.Count);
+        var newProxyUrls = new Dictionary<string, string>(channels.Count);
         int statsCount = 0;
 
         var result = new List<ChannelInfo>(channels.Count);
@@ -140,6 +142,12 @@ public class XtreamTunerHost : ITunerHost
                 statsCount++;
             }
 
+            var proxyUrl = BuildProxyStreamUrl(config, channel);
+            if (proxyUrl != null)
+            {
+                newProxyUrls[channelId] = proxyUrl;
+            }
+
             var cleanName = ChannelNameCleaner.CleanChannelName(
                 channel.Name,
                 config.ChannelRemoveTerms,
@@ -164,10 +172,15 @@ public class XtreamTunerHost : ITunerHost
 
         _channelNumberToChannelId = newMap;
         _streamStats = newStats;
+        _proxyStreamUrls = newProxyUrls;
         _cachedChannels = result;
         _cacheTime = DateTime.UtcNow;
         _cachedNumberByCategory = config.LiveTvNumberByCategory;
-        _logger.LogInformation("Channel list cached with {Count} channels ({StatsCount} with stream stats)", result.Count, statsCount);
+        _logger.LogInformation(
+            "Channel list cached with {Count} channels ({StatsCount} with stream stats, {ProxyCount} with a Dispatcharr URL without credentials)",
+            result.Count,
+            statsCount,
+            newProxyUrls.Count);
 
         return result;
     }
@@ -183,10 +196,9 @@ public class XtreamTunerHost : ITunerHost
         }
 
         var config = Plugin.Instance.Configuration;
-        var streamUrl = BuildStreamUrl(config, providerIndex, streamId);
         var canonicalChannelId = BuildChannelId(providerIndex, streamId);
+        var (streamUrl, isHls) = ResolveStreamUrl(config, providerIndex, streamId, canonicalChannelId);
         _streamStats.TryGetValue(canonicalChannelId, out var stats);
-        var isHls = !string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
 
         var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, config, _logger);
 
@@ -204,10 +216,9 @@ public class XtreamTunerHost : ITunerHost
         }
 
         var config = Plugin.Instance.Configuration;
-        var streamUrl = BuildStreamUrl(config, providerIndex, parsedStreamId);
         var canonicalChannelId = BuildChannelId(providerIndex, parsedStreamId);
+        var (streamUrl, isHls) = ResolveStreamUrl(config, providerIndex, parsedStreamId, canonicalChannelId);
         _streamStats.TryGetValue(canonicalChannelId, out var stats);
-        var isHls = !string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
 
         var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, config, _logger);
 
@@ -285,6 +296,48 @@ public class XtreamTunerHost : ITunerHost
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The URL a channel is played from: Dispatcharr's own channel URL when the channel was
+    /// matched to a Dispatcharr uuid, otherwise the Xtream URL.
+    /// <para>
+    /// This URL is the media source's Path, and clients see it. Some open it themselves instead of
+    /// asking Jellyfin for the stream: Swiftfin 1.6.1 with VLC, and Moonfin for every live
+    /// channel whatever SupportsDirectPlay says. With the Xtream URL that hands the provider login
+    /// to the app (homelab-ops #550). Dispatcharr's channel URL carries no login, the same reason
+    /// the M3U playlist uses it (GitHub #113). It always serves MPEG-TS, so it is never HLS.
+    /// </para>
+    /// </summary>
+    private (string Url, bool IsHls) ResolveStreamUrl(PluginConfiguration config, int providerIndex, int streamId, string channelId)
+    {
+        if (_proxyStreamUrls.TryGetValue(channelId, out var proxyUrl))
+        {
+            return (proxyUrl, false);
+        }
+
+        var isHls = !string.Equals(config.LiveTvOutputFormat, "ts", StringComparison.OrdinalIgnoreCase);
+        return (BuildStreamUrl(config, providerIndex, streamId), isHls);
+    }
+
+    /// <summary>
+    /// Dispatcharr's channel URL for a channel, or null when it has no uuid or its provider has
+    /// no Dispatcharr base URL.
+    /// </summary>
+    /// <param name="config">Plugin configuration.</param>
+    /// <param name="channel">The channel.</param>
+    /// <returns>The URL, or null.</returns>
+    internal static string? BuildProxyStreamUrl(PluginConfiguration config, LiveStreamInfo channel)
+    {
+        if (string.IsNullOrEmpty(channel.DispatcharrUuid))
+        {
+            return null;
+        }
+
+        var dispatcharrBase = LiveTvService.ResolveDispatcharrBaseUrl(config, channel.ProviderIndex);
+        return string.IsNullOrEmpty(dispatcharrBase)
+            ? null
+            : DispatcharrChannelMap.BuildProxyStreamUrl(dispatcharrBase, channel.DispatcharrUuid);
     }
 
     private static string BuildStreamUrl(PluginConfiguration config, int providerIndex, int streamId)
@@ -417,11 +470,11 @@ public class XtreamTunerHost : ITunerHost
             // GitHub #113, for whoever routes this path through Dispatcharr next: probing must be
             // switched off for a Dispatcharr proxy URL. The probe opens a short-lived connection
             // that Dispatcharr counts as a client and tears the channel down when it closes, which
-            // turns into a retry storm. That is in direct tension with everything below, so the two
-            // have to be reconciled before a proxy URL ever reaches here. This tuner does not build
-            // Dispatcharr proxy URLs, but when the provider itself is a Dispatcharr Xtream endpoint
-            // its /live/ URLs are served by that proxy anyway, and the teardown between probe and
-            // playback has been measured there (about 1.6 s, homelab-ops #550).
+            // turns into a retry storm. That is in direct tension with everything below. This tuner
+            // now plays matched channels from Dispatcharr's own URL (homelab-ops #550), and before
+            // that a Dispatcharr Xtream endpoint served its /live/ URLs through the same proxy, so
+            // the teardown between probe and playback (about 1.6 s) applies either way. It only
+            // concerns channels without stats; with stats there is no probe.
             //
             // GitHub #107. No stats, so leave this empty and let Jellyfin find out for itself.
             //

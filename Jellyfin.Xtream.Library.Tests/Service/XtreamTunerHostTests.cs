@@ -930,4 +930,44 @@ public class XtreamTunerHostTests : IDisposable
     }
 
     #endregion
+
+    [Fact]
+    public void BuildProxyStreamUrl_WithUuid_ReturnsDispatcharrUrlWithoutCredentials()
+    {
+        // Clients such as Moonfin open the media source Path themselves for live channels, so it
+        // must not carry the provider login (homelab-ops #550).
+        var config = new PluginConfiguration();
+        config.Providers.Add(new ProviderConfig { BaseUrl = "http://xtream.example.com:9191/", Username = "user-a", IsEnabled = true });
+        var channel = new LiveStreamInfo { StreamId = 100, DispatcharrUuid = "086aab97-3c36-41f0-a417-b97f39a69f0f" };
+
+        var url = XtreamTunerHost.BuildProxyStreamUrl(config, channel);
+
+        url.Should().Be("http://xtream.example.com:9191/proxy/ts/stream/086aab97-3c36-41f0-a417-b97f39a69f0f");
+        url.Should().NotContain("user-a");
+    }
+
+    [Fact]
+    public void BuildProxyStreamUrl_UsesTheDispatcharrBaseUrl_WhenSet()
+    {
+        var config = new PluginConfiguration();
+        config.Providers.Add(new ProviderConfig
+        {
+            BaseUrl = "http://xtream.example.com",
+            DispatcharrBaseUrl = "http://dispatcharr.example.com:9191",
+            IsEnabled = true,
+        });
+        var channel = new LiveStreamInfo { StreamId = 100, DispatcharrUuid = "abc" };
+
+        XtreamTunerHost.BuildProxyStreamUrl(config, channel)
+            .Should().Be("http://dispatcharr.example.com:9191/proxy/ts/stream/abc");
+    }
+
+    [Fact]
+    public void BuildProxyStreamUrl_WithoutUuid_ReturnsNull()
+    {
+        var config = new PluginConfiguration();
+        config.Providers.Add(new ProviderConfig { BaseUrl = "http://xtream.example.com", IsEnabled = true });
+
+        XtreamTunerHost.BuildProxyStreamUrl(config, new LiveStreamInfo { StreamId = 100 }).Should().BeNull();
+    }
 }
