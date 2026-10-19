@@ -122,6 +122,71 @@ public class StreamUrlRedactorTests
         stream.ConsumerCount.Should().Be(1, "the client that opened it is its first consumer");
     }
 
+    [Fact]
+    public async Task LiveStream_TwoConcurrentReads_ConnectOnce()
+    {
+        // Shared, so two consumers can read at once; two connections would take two slots on a
+        // provider that may allow one (PR #167 review).
+        var handler = new SlowHandler();
+        using var client = new HttpClient(handler);
+        using var stream = new XtreamLiveStream(new MediaSourceInfo { Id = "1", Path = "http://host/1.ts" }, client, new ListLogger(new List<string>()));
+
+        var reads = Enumerable.Range(0, 4).Select(_ => Task.Run(() => stream.GetStream())).ToArray();
+        var streams = await Task.WhenAll(reads);
+
+        handler.Requests.Should().Be(1);
+        streams.Distinct().Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void LiveStream_FailedConnect_DisposesTheResponse()
+    {
+        var content = new TrackedContent();
+        using var client = new HttpClient(new FixedHandler(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = content }));
+        using var stream = new XtreamLiveStream(new MediaSourceInfo { Id = "1", Path = "http://host/1.ts" }, client, new ListLogger(new List<string>()));
+
+        var read = () => stream.GetStream();
+
+        read.Should().Throw<HttpRequestException>();
+        content.Disposed.Should().BeTrue("a failed response must not keep its connection open");
+    }
+
+    private sealed class SlowHandler : HttpMessageHandler
+    {
+        private int _requests;
+
+        public int Requests => _requests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requests);
+            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[188]) };
+        }
+    }
+
+    private sealed class FixedHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(response);
+    }
+
+    private sealed class TrackedContent : ByteArrayContent
+    {
+        public TrackedContent()
+            : base(Array.Empty<byte>())
+        {
+        }
+
+        public bool Disposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
     private sealed class StatusHandler(HttpStatusCode status) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

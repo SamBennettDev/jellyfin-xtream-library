@@ -31,6 +31,7 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
+    private readonly object _connectLock = new();
     private HttpResponseMessage? _response;
     private Stream? _stream;
     private bool _disposed;
@@ -100,18 +101,22 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     private async Task ConnectAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Opening stream: {Url}", StreamUrlRedactor.Redact(MediaSource.Path));
+        HttpResponseMessage? response = null;
         try
         {
-            _response = await _httpClient.GetAsync(
+            response = await _httpClient.GetAsync(
                 MediaSource.Path,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
-            _response.EnsureSuccessStatusCode();
-            _stream = await _response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Stream opened successfully (HTTP {StatusCode})", (int)_response.StatusCode);
+            response.EnsureSuccessStatusCode();
+            _stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            _response = response;
+            _logger.LogInformation("Stream opened successfully (HTTP {StatusCode})", (int)response.StatusCode);
         }
         catch (HttpRequestException ex)
         {
+            // A failed response is not kept, so a retry cannot leave its connection open.
+            response?.Dispose();
             _logger.LogError(
                 ex,
                 "Failed to open stream {Url} — HTTP {StatusCode}: {Reason}. Check BaseUrl, Username, and Password in plugin settings.",
@@ -130,25 +135,39 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Connects under a lock: the stream is shared, so two consumers can get here at once, and two
+    /// connections would take two slots on a provider that may allow one.
+    /// </remarks>
     public Stream GetStream()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_stream is null)
+        lock (_connectLock)
         {
-            ConnectAsync(CancellationToken.None).GetAwaiter().GetResult();
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_stream is null)
+            {
+                ConnectAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
 
-        return _stream!;
+            return _stream!;
+        }
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Takes the same lock as <see cref="GetStream"/>, so a connect in progress finishes first and
+    /// its stream is disposed here rather than left open.
+    /// </remarks>
     public void Dispose()
     {
-        if (!_disposed)
+        lock (_connectLock)
         {
-            _stream?.Dispose();
-            _response?.Dispose();
-            _disposed = true;
+            if (!_disposed)
+            {
+                _stream?.Dispose();
+                _response?.Dispose();
+                _disposed = true;
+            }
         }
     }
 }
