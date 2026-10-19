@@ -31,6 +31,7 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
     private readonly object _connectLock = new();
     private HttpResponseMessage? _response;
     private Stream? _stream;
@@ -146,7 +147,10 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_stream is null)
             {
-                ConnectAsync(CancellationToken.None).GetAwaiter().GetResult();
+                // Bounded, because Dispose waits on the same lock: a stalled provider must not hold
+                // up closing the session for HttpClient's default 100 s.
+                using var timeout = new CancellationTokenSource(ConnectTimeout);
+                ConnectAsync(timeout.Token).GetAwaiter().GetResult();
             }
 
             return _stream!;
