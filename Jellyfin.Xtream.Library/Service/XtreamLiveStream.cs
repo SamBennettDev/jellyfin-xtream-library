@@ -116,8 +116,6 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
         }
         catch (HttpRequestException ex)
         {
-            // A failed response is not kept, so a retry cannot leave its connection open.
-            response?.Dispose();
             _logger.LogError(
                 ex,
                 "Failed to open stream {Url} — HTTP {StatusCode}: {Reason}. Check BaseUrl, Username, and Password in plugin settings.",
@@ -125,6 +123,15 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
                 (int?)ex.StatusCode,
                 ex.Message);
             throw;
+        }
+        finally
+        {
+            // A response that did not become the stream (failed status, timeout) is not kept, so a
+            // retry cannot leave its connection open.
+            if (!ReferenceEquals(response, _response))
+            {
+                response?.Dispose();
+            }
         }
     }
 
