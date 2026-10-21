@@ -46,6 +46,7 @@ public class StreamUrlRedactorTests
     [InlineData("http://host/movie/movie/alice/opensesame/5.mkv", "http://host/movie/movie/***/***/5.mkv")]
     [InlineData("http://host/live/timeshift/alice/opensesame/60/2026-10-11:20-00/9.ts", "http://host/live/timeshift/***/***/60/2026-10-11:20-00/9.ts")]
     [InlineData("http://host/live/alice/opensesame/123.ts?token=x", "http://host/live/***/***/123.ts?token=x")]
+    [InlineData("http://host/live/live/alice/opensesame/123.ts/", "http://host/live/live/***/***/123.ts/")]
     [InlineData("{\"user_info\":{\"username\":\"alice\",\"password\":\"opensesame\",\"status\":\"Active\"}}", "{\"user_info\":{\"username\":\"***\",\"password\":\"***\",\"status\":\"Active\"}}")]
     [InlineData("{\"user_info\":{\"password\" : \"opens", "{\"user_info\":{\"password\" : \"***\"")]
     [InlineData("http://host/player_api.php?username=alice&password=opensesame&action=get_vod_streams", "http://host/player_api.php?username=***&password=***&action=get_vod_streams")]

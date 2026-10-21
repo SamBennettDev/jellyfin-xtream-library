@@ -188,6 +188,9 @@ public class DispatcharrChannelMapTests
     [Theory]
     [InlineData("x\n#EXTINF:-1,Injected\n/config/data/jellyfin.db")]
     [InlineData("not-a-uuid")]
+    [InlineData("086aab97-3c36-41f0-a417-b97f39a69f0f\n#EXTINF:-1,Injected")]
+    [InlineData("\n086aab97-3c36-41f0-a417-b97f39a69f0f")]
+    [InlineData("086aab97-3c36-41f0-a417-b97f39a69f0f\n")]
     [InlineData("")]
     public void AValueThatIsNotAUuidIsLeftOut(string uuid)
     {

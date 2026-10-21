@@ -72,8 +72,8 @@ public static partial class StreamUrlRedactor
     private static partial Regex PathCredentials();
 
     // The same, anchored at the end: user and password followed by the stream id (live, movie,
-    // series) or by duration, start and id (timeshift), with an optional query.
-    [GeneratedRegex("(?<!/api/vod)/(?<t>live|movie|series)/[^/]*/[^/]*/(?=[^/?#]*(?:[?#].*)?$)|(?<!/api/vod)/(?<t>timeshift)/[^/]*/[^/]*/(?=[^/]+/[^/]+/[^/?#]*(?:[?#].*)?$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // series) or by duration, start and id (timeshift), with an optional trailing slash and query.
+    [GeneratedRegex("(?<!/api/vod)/(?<t>live|movie|series)/[^/]*/[^/]*/(?=[^/?#]*/?(?:[?#].*)?$)|(?<!/api/vod)/(?<t>timeshift)/[^/]*/[^/]*/(?=[^/]+/[^/]+/[^/?#]*/?(?:[?#].*)?$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TailPathCredentials();
 
     [GeneratedRegex("([?&](?:username|password)=)[^&#]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

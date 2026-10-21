@@ -139,7 +139,9 @@ public static class DispatcharrChannelMap
     /// </summary>
     /// <param name="value">The value.</param>
     /// <returns>True for a uuid.</returns>
-    public static bool IsUuid(string? value) => Guid.TryParseExact(value, "D", out _);
+    /// <remarks>The length check matters: the parser trims whitespace, so a uuid with a line break
+    /// beside it would otherwise pass and the line break would reach the playlist.</remarks>
+    public static bool IsUuid(string? value) => value?.Length == 36 && Guid.TryParseExact(value, "D", out _);
 
     /// <summary>
     /// The credential-free URL for one channel.

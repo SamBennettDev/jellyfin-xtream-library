@@ -4473,13 +4473,17 @@ public partial class StrmSyncService
 
         try
         {
-            using var response = await ImageHttpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            // One deadline for headers and body: the client's own timeout ends once the headers are
+            // in, and a host that then sends a byte now and then would hold a download slot forever.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            using var response = await ImageHttpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return false;
             }
 
-            var imageBytes = await ReadImageResponseAsync(response, cancellationToken).ConfigureAwait(false);
+            var imageBytes = await ReadImageResponseAsync(response, deadline.Token).ConfigureAwait(false);
             if (imageBytes is null)
             {
                 _logger.LogDebug("Skipped image from {Url}: not an image, or larger than {Max} bytes", StreamUrlRedactor.Redact(imageUrl), MaxImageBytes);
