@@ -60,6 +60,9 @@ public partial class StrmSyncService
     // improves performance by reusing TCP connections. A default User-Agent is set below.
     private static readonly HttpClient ImageHttpClient = CreateImageHttpClient();
 
+    /// <summary>The largest artwork file downloaded, in bytes.</summary>
+    internal const int MaxImageBytes = 20 * 1024 * 1024;
+
     private readonly IXtreamClient _client;
     private readonly IDispatcharrClient _dispatcharrClient;
     private readonly ILibraryManager _libraryManager;
@@ -4457,9 +4460,16 @@ public partial class StrmSyncService
 
         try
         {
-            using var response = await ImageHttpClient.GetAsync(imageUrl, cancellationToken).ConfigureAwait(false);
+            using var response = await ImageHttpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                return false;
+            }
+
+            var imageBytes = await ReadImageResponseAsync(response, cancellationToken).ConfigureAwait(false);
+            if (imageBytes is null)
+            {
+                _logger.LogDebug("Skipped image from {Url}: not an image, or larger than {Max} bytes", StreamUrlRedactor.Redact(imageUrl), MaxImageBytes);
                 return false;
             }
 
@@ -4470,17 +4480,57 @@ public partial class StrmSyncService
                 Directory.CreateDirectory(directory);
             }
 
-            // Save image
-            var imageBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             await File.WriteAllBytesAsync(destinationPath, imageBytes, cancellationToken).ConfigureAwait(false);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to download image from {Url}", imageUrl);
+            _logger.LogDebug(ex, "Failed to download image from {Url}", StreamUrlRedactor.Redact(imageUrl));
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads an artwork response, or returns null when it is not an image or is too large. The
+    /// address comes from the provider, so without a limit one answer could fill the server's memory
+    /// (five downloads run at once), and an HTML or JSON page would be saved as poster.jpg.
+    /// </summary>
+    /// <param name="response">The response, read with headers only.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The image bytes, or null.</returns>
+    internal static async Task<byte[]?> ReadImageResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        // A missing type or octet-stream is common for image hosts and kept; a named non-image type is not.
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is not null
+            && !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, "binary/octet-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (response.Content.Headers.ContentLength > MaxImageBytes)
+        {
+            return null;
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxImageBytes)
+            {
+                return null;
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        return buffer.Length == 0 ? null : buffer.ToArray();
     }
 
     /// <summary>
