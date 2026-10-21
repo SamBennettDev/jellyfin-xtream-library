@@ -1954,8 +1954,11 @@ public partial class StrmSyncService
 
                     // Build STRM URLs and filenames — Dispatcharr multi-stream or standard single-stream
                     var strmEntries = new List<(string StreamUrl, string StrmFileName)>();
+                    // A value that is not a uuid would go into the STRM URL as is; fall back to
+                    // the Xtream URL instead.
                     if (enableDispatcharrMode &&
-                        dispatcharrCache.TryGetValue(stream.StreamId, out var movieProviderInfo))
+                        dispatcharrCache.TryGetValue(stream.StreamId, out var movieProviderInfo) &&
+                        DispatcharrChannelMap.IsUuid(movieProviderInfo.Uuid))
                     {
                         var providers = movieProviderInfo.Providers;
                         string uuid = movieProviderInfo.Uuid;
