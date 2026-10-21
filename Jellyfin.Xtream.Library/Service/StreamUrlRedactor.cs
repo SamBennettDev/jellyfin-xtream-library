@@ -41,7 +41,15 @@ public static partial class StreamUrlRedactor
             return string.Empty;
         }
 
-        var result = PathCredentials().Replace(url, $"/$1/{Hidden}/{Hidden}/");
+        // The credentials sit right before the stream id, so match them there first. Matching the
+        // first /live/ in the URL instead masked the wrong two segments when the base URL itself
+        // ended in one of these words (http://host/live), and the password was logged.
+        var result = TailPathCredentials().Replace(url, "/${t}/" + Hidden + "/" + Hidden + "/");
+        if (result == url)
+        {
+            result = PathCredentials().Replace(url, $"/$1/{Hidden}/{Hidden}/");
+        }
+
         result = QueryCredentials().Replace(result, $"$1{Hidden}");
         return JsonCredentials().Replace(result, $"$1\"{Hidden}\"");
     }
@@ -62,6 +70,11 @@ public static partial class StreamUrlRedactor
     // which is not a stream URL.
     [GeneratedRegex("(?<!/api/vod)/(live|movie|series|timeshift)/[^/]*/[^/]*/", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PathCredentials();
+
+    // The same, anchored at the end: user and password followed by the stream id (live, movie,
+    // series) or by duration, start and id (timeshift), with an optional trailing slash and query.
+    [GeneratedRegex("(?<!/api/vod)/(?<t>live|movie|series)/[^/]*/[^/]*/(?=[^/?#]*/?(?:[?#].*)?$)|(?<!/api/vod)/(?<t>timeshift)/[^/]*/[^/]*/(?=[^/]+/[^/]+/[^/?#]*/?(?:[?#].*)?$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TailPathCredentials();
 
     [GeneratedRegex("([?&](?:username|password)=)[^&#]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex QueryCredentials();

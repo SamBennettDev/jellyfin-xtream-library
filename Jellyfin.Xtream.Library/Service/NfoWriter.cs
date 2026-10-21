@@ -524,7 +524,7 @@ public static class NfoWriter
             return string.Empty;
         }
 
-        return text
+        return XmlText.RemoveInvalidChars(text)
             .Replace("&", "&amp;", StringComparison.Ordinal)
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal)

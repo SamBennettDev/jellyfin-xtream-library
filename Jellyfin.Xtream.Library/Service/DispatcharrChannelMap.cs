@@ -56,12 +56,15 @@ public static class DispatcharrChannelMap
 
         foreach (var channel in channels)
         {
-            if (string.IsNullOrWhiteSpace(channel?.Uuid))
+            // Only a real uuid. The value goes into the M3U playlist and the media source path as
+            // is, so a line break in it would add a channel of Dispatcharr's choosing to the
+            // playlist the anonymous endpoints serve.
+            if (!IsUuid(channel?.Uuid))
             {
                 continue;
             }
 
-            if (channel.Streams != null)
+            if (channel!.Streams != null)
             {
                 foreach (var stream in channel.Streams)
                 {
@@ -130,6 +133,15 @@ public static class DispatcharrChannelMap
 
         return byChannel;
     }
+
+    /// <summary>
+    /// Whether a value is a uuid, as Dispatcharr's channel and movie uuids are.
+    /// </summary>
+    /// <param name="value">The value.</param>
+    /// <returns>True for a uuid.</returns>
+    /// <remarks>The length check matters: the parser trims whitespace, so a uuid with a line break
+    /// beside it would otherwise pass and the line break would reach the playlist.</remarks>
+    public static bool IsUuid(string? value) => value?.Length == 36 && Guid.TryParseExact(value, "D", out _);
 
     /// <summary>
     /// The credential-free URL for one channel.

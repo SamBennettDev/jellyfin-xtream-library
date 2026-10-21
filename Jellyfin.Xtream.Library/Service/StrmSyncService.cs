@@ -60,6 +60,12 @@ public partial class StrmSyncService
     // improves performance by reusing TCP connections. A default User-Agent is set below.
     private static readonly HttpClient ImageHttpClient = CreateImageHttpClient();
 
+    /// <summary>The longest provider title read when building a file name, in characters.</summary>
+    internal const int MaxTitleLength = 500;
+
+    /// <summary>The largest artwork file downloaded, in bytes.</summary>
+    internal const int MaxImageBytes = 20 * 1024 * 1024;
+
     private readonly IXtreamClient _client;
     private readonly IDispatcharrClient _dispatcharrClient;
     private readonly ILibraryManager _libraryManager;
@@ -1951,8 +1957,11 @@ public partial class StrmSyncService
 
                     // Build STRM URLs and filenames — Dispatcharr multi-stream or standard single-stream
                     var strmEntries = new List<(string StreamUrl, string StrmFileName)>();
+                    // A value that is not a uuid would go into the STRM URL as is; fall back to
+                    // the Xtream URL instead.
                     if (enableDispatcharrMode &&
-                        dispatcharrCache.TryGetValue(stream.StreamId, out var movieProviderInfo))
+                        dispatcharrCache.TryGetValue(stream.StreamId, out var movieProviderInfo) &&
+                        DispatcharrChannelMap.IsUuid(movieProviderInfo.Uuid))
                     {
                         var providers = movieProviderInfo.Providers;
                         string uuid = movieProviderInfo.Uuid;
@@ -3471,7 +3480,12 @@ public partial class StrmSyncService
             return "Unknown";
         }
 
-        string cleanName = name;
+        // No real title comes near this, and the file name is cut to 255 bytes later anyway. A
+        // longer one only makes the patterns below slow: AsianBracketedTextPattern takes seconds on
+        // a title of a few thousand characters, and this runs several times per movie.
+        string cleanName = name.Length > MaxTitleLength
+            ? name[..(char.IsHighSurrogate(name[MaxTitleLength - 1]) ? MaxTitleLength - 1 : MaxTitleLength)]
+            : name;
 
         // Apply user-defined custom removal terms first
         if (!string.IsNullOrWhiteSpace(customRemoveTerms))
@@ -3540,7 +3554,9 @@ public partial class StrmSyncService
         cleanName = MultipleUnderscoresPattern().Replace(cleanName, "_");
         cleanName = cleanName.Trim('_', ' ', '-');
 
-        return string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName;
+        // "." and ".." are not names: as a folder they mean this directory or the one above it, so
+        // a title of ".." would put its files next to the Movies or Series folder.
+        return string.IsNullOrEmpty(cleanName) || cleanName.Trim('.').Length == 0 ? "Unknown" : cleanName;
     }
 
     internal static string? ExtractVersionLabel(string? name)
@@ -4457,9 +4473,20 @@ public partial class StrmSyncService
 
         try
         {
-            using var response = await ImageHttpClient.GetAsync(imageUrl, cancellationToken).ConfigureAwait(false);
+            // One deadline for headers and body: the client's own timeout ends once the headers are
+            // in, and a host that then sends a byte now and then would hold a download slot forever.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            using var response = await ImageHttpClient.GetAsync(imageUrl, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                return false;
+            }
+
+            var imageBytes = await ReadImageResponseAsync(response, deadline.Token).ConfigureAwait(false);
+            if (imageBytes is null)
+            {
+                _logger.LogDebug("Skipped image from {Url}: not an image, or larger than {Max} bytes", StreamUrlRedactor.Redact(imageUrl), MaxImageBytes);
                 return false;
             }
 
@@ -4470,17 +4497,57 @@ public partial class StrmSyncService
                 Directory.CreateDirectory(directory);
             }
 
-            // Save image
-            var imageBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             await File.WriteAllBytesAsync(destinationPath, imageBytes, cancellationToken).ConfigureAwait(false);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to download image from {Url}", imageUrl);
+            _logger.LogDebug(ex, "Failed to download image from {Url}", StreamUrlRedactor.Redact(imageUrl));
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads an artwork response, or returns null when it is not an image or is too large. The
+    /// address comes from the provider, so without a limit one answer could fill the server's memory
+    /// (five downloads run at once), and an HTML or JSON page would be saved as poster.jpg.
+    /// </summary>
+    /// <param name="response">The response, read with headers only.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The image bytes, or null.</returns>
+    internal static async Task<byte[]?> ReadImageResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        // A missing type or octet-stream is common for image hosts and kept; a named non-image type is not.
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is not null
+            && !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, "binary/octet-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (response.Content.Headers.ContentLength > MaxImageBytes)
+        {
+            return null;
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxImageBytes)
+            {
+                return null;
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        return buffer.Length == 0 ? null : buffer.ToArray();
     }
 
     /// <summary>
