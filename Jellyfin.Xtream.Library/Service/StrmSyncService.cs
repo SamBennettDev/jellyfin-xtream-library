@@ -60,6 +60,9 @@ public partial class StrmSyncService
     // improves performance by reusing TCP connections. A default User-Agent is set below.
     private static readonly HttpClient ImageHttpClient = CreateImageHttpClient();
 
+    /// <summary>The longest provider title read when building a file name, in characters.</summary>
+    internal const int MaxTitleLength = 500;
+
     /// <summary>The largest artwork file downloaded, in bytes.</summary>
     internal const int MaxImageBytes = 20 * 1024 * 1024;
 
@@ -3477,7 +3480,12 @@ public partial class StrmSyncService
             return "Unknown";
         }
 
-        string cleanName = name;
+        // No real title comes near this, and the file name is cut to 255 bytes later anyway. A
+        // longer one only makes the patterns below slow: AsianBracketedTextPattern takes seconds on
+        // a title of a few thousand characters, and this runs several times per movie.
+        string cleanName = name.Length > MaxTitleLength
+            ? name[..(char.IsHighSurrogate(name[MaxTitleLength - 1]) ? MaxTitleLength - 1 : MaxTitleLength)]
+            : name;
 
         // Apply user-defined custom removal terms first
         if (!string.IsNullOrWhiteSpace(customRemoveTerms))
@@ -3546,7 +3554,9 @@ public partial class StrmSyncService
         cleanName = MultipleUnderscoresPattern().Replace(cleanName, "_");
         cleanName = cleanName.Trim('_', ' ', '-');
 
-        return string.IsNullOrEmpty(cleanName) ? "Unknown" : cleanName;
+        // "." and ".." are not names: as a folder they mean this directory or the one above it, so
+        // a title of ".." would put its files next to the Movies or Series folder.
+        return string.IsNullOrEmpty(cleanName) || cleanName.Trim('.').Length == 0 ? "Unknown" : cleanName;
     }
 
     internal static string? ExtractVersionLabel(string? name)
