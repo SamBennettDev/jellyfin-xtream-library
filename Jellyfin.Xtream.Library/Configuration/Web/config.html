@@ -232,6 +232,7 @@
                         <button type="button" class="xtream-tab" data-tab="series" role="tab" aria-selected="false" aria-controls="tab-series">Series</button>
                         <button type="button" class="xtream-tab" data-tab="livetv" role="tab" aria-selected="false" aria-controls="tab-livetv">Live TV</button>
                         <button type="button" class="xtream-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="tab-general">General</button>
+                        <button type="button" class="xtream-tab" data-tab="pressbox" role="tab" aria-selected="false" aria-controls="tab-pressbox">PressBox</button>
                     </div>
 
                     <!-- Dashboard Tab -->
@@ -1329,6 +1330,127 @@
                                 </div>
                             </details>
                         </div>
+                        </div>
+                    </div>
+
+                    <!-- PressBox Tab: guide matching, stream limits, languages, sports, trending, multiview -->
+                    <div id="tab-pressbox" class="xtream-tab-content" role="tabpanel" aria-labelledby="pressbox">
+                        <div class="verticalSection">
+                            <h3 class="sectionTitle">Default guide</h3>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbEnableDefaultGuide" />
+                                    <span>Fill in channels the provider has no guide for</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">
+                                    Fetches free guides (epgshare01 by default) and matches a channel only when there is no doubt: by guide id, by a local station's call sign, or by an exact name. Never a guess. The provider's own guide always wins.
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbGuideUrls">Guide addresses (one per line)</label>
+                                <textarea id="txtPbGuideUrls" class="emby-textarea" rows="4" style="width:100%"></textarea>
+                                <div class="fieldDescription">Leave empty for the built-in list. Gzipped guides are fine.</div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbGuideHours">Refresh every (hours)</label>
+                                <input is="emby-input" type="number" id="txtPbGuideHours" min="1" max="168" step="1" />
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbOverrideNames" />
+                                    <span>Use the guide's channel name and logo for matched channels</span>
+                                </label>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbManualMatches">Hand-picked matches (channel id=guide id, one per line)</label>
+                                <textarea id="txtPbManualMatches" class="emby-textarea" rows="3" style="width:100%"></textarea>
+                            </div>
+                            <button is="emby-button" type="button" id="btnPbGuideRefresh" class="raised"><span>Fetch guides now</span></button>
+                            <div id="pbGuideStatus" class="fieldDescription" style="margin-top:8px"></div>
+                        </div>
+
+                        <div class="verticalSection">
+                            <h3 class="sectionTitle">Stream limits</h3>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbStreamLimits" />
+                                    <span>Keep within each provider's connection limit</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">
+                                    A viewer who would use more streams than the account has is refused with a message, instead of the provider blocking the account.
+                                </div>
+                            </div>
+                            <div class="checkboxContainer">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbPauseSync" />
+                                    <span>Wait for a quiet minute before a library sync starts</span>
+                                </label>
+                            </div>
+                            <div id="pbProviderLimits"></div>
+                            <button is="emby-button" type="button" id="btnPbLimitsRefresh" class="raised"><span>Ask providers for their limits</span></button>
+                            <div id="pbLimitStatus" class="fieldDescription" style="margin-top:8px"></div>
+                        </div>
+
+                        <div class="verticalSection">
+                            <h3 class="sectionTitle">Languages</h3>
+                            <div class="fieldDescription">Select only the categories in the languages you read. This replaces the current category selection for the active provider.</div>
+                            <button is="emby-button" type="button" id="btnPbLoadLanguages" class="raised"><span>Find languages</span></button>
+                            <div id="pbLanguages" style="margin-top:8px"></div>
+                            <button is="emby-button" type="button" id="btnPbApplyLanguages" class="raised" style="display:none"><span>Select these languages' categories</span></button>
+                            <div id="pbLanguageResult" class="fieldDescription" style="margin-top:8px"></div>
+                        </div>
+
+                        <div class="verticalSection">
+                            <h3 class="sectionTitle">Sports and trending</h3>
+                            <div class="checkboxContainer">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbSports" />
+                                    <span>Show today's games (ESPN) and the channels showing them</span>
+                                </label>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbLeagues">Leagues (comma separated ids)</label>
+                                <input is="emby-input" type="text" id="txtPbLeagues" />
+                            </div>
+                            <div class="checkboxContainer">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbTrending" />
+                                    <span>Rank what is on now (live games, big networks, search trends)</span>
+                                </label>
+                            </div>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbTrendingCollection" />
+                                    <span>Keep a "Trending Now" collection of synced movies and series</span>
+                                </label>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbCollectionSize">Collection size</label>
+                                <input is="emby-input" type="number" id="txtPbCollectionSize" min="5" max="100" step="1" />
+                            </div>
+                            <button is="emby-button" type="button" id="btnPbShowSlate" class="raised"><span>Show today's games</span></button>
+                            <button is="emby-button" type="button" id="btnPbShowTrending" class="raised"><span>Show what is on now</span></button>
+                            <div id="pbSportsOutput" style="margin-top:8px"></div>
+                        </div>
+
+                        <div class="verticalSection">
+                            <h3 class="sectionTitle">Multiview</h3>
+                            <div class="checkboxContainer checkboxContainer-withDescription">
+                                <label class="emby-checkbox-label">
+                                    <input is="emby-checkbox" type="checkbox" id="chkPbMultiview" />
+                                    <span>Offer multiviews as Live TV channels</span>
+                                </label>
+                                <div class="fieldDescription checkboxFieldDescription">
+                                    Mixes up to four channels into one picture with ffmpeg. Each tile uses one of the provider's streams, and needs a server that can decode and encode four streams at once.
+                                </div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtPbFfmpeg">ffmpeg path (empty uses Jellyfin's)</label>
+                                <input is="emby-input" type="text" id="txtPbFfmpeg" />
+                            </div>
+                            <div id="pbMultiviews"></div>
+                            <button is="emby-button" type="button" id="btnPbAddMultiview" class="raised"><span>Add a multiview</span></button>
+                            <div class="fieldDescription" style="margin-top:8px">After saving, refresh the guide in Live TV settings for new multiviews to appear as channels.</div>
                         </div>
                     </div>
 

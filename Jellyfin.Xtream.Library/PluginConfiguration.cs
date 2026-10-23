@@ -65,6 +65,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public List<ProviderConfig> Providers { get; set; } = new();
 
     // =====================
+    // PressBox features
+    // =====================
+
+    /// <summary>
+    /// Gets or sets the settings of the features brought over from PressBox (default guide matching, languages,
+    /// stream limits, sports, trending, multiview).
+    /// </summary>
+    public PressboxSettings Pressbox { get; set; } = new();
+
+    // =====================
     // Global: Schedule
     // =====================
 
@@ -518,6 +528,10 @@ public class PluginConfiguration : BasePluginConfiguration
         // Global: daily schedule
         SyncDailyHour = Math.Clamp(SyncDailyHour, 0, 23);
         SyncDailyMinute = Math.Clamp(SyncDailyMinute, 0, 59);
+
+        // PressBox features
+        Pressbox ??= new PressboxSettings();
+        Pressbox.Validate();
 
         // Per-provider validation
         foreach (var provider in Providers)

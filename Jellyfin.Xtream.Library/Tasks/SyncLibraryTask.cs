@@ -30,14 +30,17 @@ public class SyncLibraryTask : IScheduledTask, IConfigurableScheduledTask
 {
     private readonly StrmSyncService _syncService;
     private readonly ILogger<SyncLibraryTask> _logger;
+    private readonly Service.Pressbox.PlaybackActivity? _activity;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SyncLibraryTask"/> class.
     /// </summary>
     /// <param name="syncService">The STRM sync service.</param>
     /// <param name="logger">The logger instance.</param>
-    public SyncLibraryTask(StrmSyncService syncService, ILogger<SyncLibraryTask> logger)
+    /// <param name="activity">Tracks live viewing, so the sync can wait for a quiet minute (optional).</param>
+    public SyncLibraryTask(StrmSyncService syncService, ILogger<SyncLibraryTask> logger, Service.Pressbox.PlaybackActivity? activity = null)
     {
+        _activity = activity;
         _syncService = syncService;
         _logger = logger;
     }
@@ -66,6 +69,19 @@ public class SyncLibraryTask : IScheduledTask, IConfigurableScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        // Watching beats syncing: a sync holds the provider's connections for minutes, and a panel
+        // that is busy answers a viewer's stream request with an error. Wait for a quiet minute.
+        if (_activity is not null && Plugin.Instance.Configuration.Pressbox.PauseSyncWhileWatching)
+        {
+            var waited = 0;
+            while (_activity.ShouldWait(waited))
+            {
+                waited++;
+                _logger.LogInformation("Someone is watching live TV; the sync waits ({Waited}/{Max} min)", waited, Service.Pressbox.PlaybackActivity.MaxWaitMinutes);
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         _logger.LogInformation("Starting Xtream Library sync task");
         progress.Report(0);
 

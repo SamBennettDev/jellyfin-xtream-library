@@ -315,7 +315,392 @@ var XtreamLibraryConfig = (function () {
         if (tabName === 'dashboard') {
             this.loadDashboard();
         }
+
+        if (tabName === 'pressbox') {
+            this.renderProviderLimits();
+            this.renderMultiviews();
+            this.refreshGuideStatus();
+            this.refreshLimitStatus(false);
+        }
     },
+
+    // ---- PressBox tab -------------------------------------------------------------------------
+
+    // The multiviews being edited; written back to config.Pressbox.Multiviews on save.
+    pbMultiviews: [],
+    pbLanguageChoices: [],
+
+    pbDefaults: function () {
+        return {
+            EnableDefaultGuide: false, DefaultGuideUrls: '', DefaultGuideOverridesNames: false,
+            DefaultGuideRefreshHours: 12, GuideManualMatches: '', PreferredLanguages: 'en',
+            EnableStreamLimits: false, PauseSyncWhileWatching: false,
+            EnableSports: false, SportsLeagues: 'nfl,ncaaf,nba,wnba,ncaam,mlb,nhl,pga,nascar,f1,ufc,mls',
+            EnableTrending: false, EnableTrendingCollections: false, TrendingCollectionSize: 30,
+            EnableMultiview: false, FfmpegPath: '', Multiviews: []
+        };
+    },
+
+    pbRandomHex: function (bytes) {
+        var a = new Uint8Array(bytes);
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            crypto.getRandomValues(a);
+        } else {
+            for (var i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256);
+        }
+        return Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    },
+
+    loadPressbox: function (config) {
+        var d = this.pbDefaults();
+        var pb = Object.assign({}, d, config.Pressbox || {});
+        document.getElementById('chkPbEnableDefaultGuide').checked = pb.EnableDefaultGuide === true;
+        document.getElementById('txtPbGuideUrls').value = pb.DefaultGuideUrls || '';
+        document.getElementById('txtPbGuideHours').value = pb.DefaultGuideRefreshHours || 12;
+        document.getElementById('chkPbOverrideNames').checked = pb.DefaultGuideOverridesNames === true;
+        document.getElementById('txtPbManualMatches').value = pb.GuideManualMatches || '';
+        document.getElementById('chkPbStreamLimits').checked = pb.EnableStreamLimits === true;
+        document.getElementById('chkPbPauseSync').checked = pb.PauseSyncWhileWatching === true;
+        document.getElementById('chkPbSports').checked = pb.EnableSports === true;
+        document.getElementById('txtPbLeagues').value = pb.SportsLeagues || d.SportsLeagues;
+        document.getElementById('chkPbTrending').checked = pb.EnableTrending === true;
+        document.getElementById('chkPbTrendingCollection').checked = pb.EnableTrendingCollections === true;
+        document.getElementById('txtPbCollectionSize').value = pb.TrendingCollectionSize || 30;
+        document.getElementById('chkPbMultiview').checked = pb.EnableMultiview === true;
+        document.getElementById('txtPbFfmpeg').value = pb.FfmpegPath || '';
+        this.pbPreferredLanguages = String(pb.PreferredLanguages || 'en').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+        this.pbMultiviews = (pb.Multiviews || []).map(function (m) {
+            return {
+                Id: m.Id, Token: m.Token, Name: m.Name || 'Multiview', Layout: m.Layout || 'Grid',
+                AudioIndex: m.AudioIndex || 0, ChannelIds: (m.ChannelIds || []).slice()
+            };
+        });
+        // Drawn when the tab is opened, not here: nothing on it is visible before then.
+    },
+
+    savePressbox: function (config) {
+        var pb = Object.assign({}, this.pbDefaults(), config.Pressbox || {});
+        pb.EnableDefaultGuide = document.getElementById('chkPbEnableDefaultGuide').checked;
+        pb.DefaultGuideUrls = document.getElementById('txtPbGuideUrls').value;
+        pb.DefaultGuideRefreshHours = parseInt(document.getElementById('txtPbGuideHours').value, 10) || 12;
+        pb.DefaultGuideOverridesNames = document.getElementById('chkPbOverrideNames').checked;
+        pb.GuideManualMatches = document.getElementById('txtPbManualMatches').value;
+        pb.EnableStreamLimits = document.getElementById('chkPbStreamLimits').checked;
+        pb.PauseSyncWhileWatching = document.getElementById('chkPbPauseSync').checked;
+        pb.EnableSports = document.getElementById('chkPbSports').checked;
+        pb.SportsLeagues = document.getElementById('txtPbLeagues').value.trim();
+        pb.EnableTrending = document.getElementById('chkPbTrending').checked;
+        pb.EnableTrendingCollections = document.getElementById('chkPbTrendingCollection').checked;
+        pb.TrendingCollectionSize = parseInt(document.getElementById('txtPbCollectionSize').value, 10) || 30;
+        pb.EnableMultiview = document.getElementById('chkPbMultiview').checked;
+        pb.FfmpegPath = document.getElementById('txtPbFfmpeg').value.trim();
+        pb.Multiviews = this.pbMultiviews.map(function (m) {
+            return {
+                Id: m.Id, Token: m.Token, Name: m.Name, Layout: m.Layout,
+                AudioIndex: m.AudioIndex, ChannelIds: m.ChannelIds.slice(0, 4)
+            };
+        });
+        config.Pressbox = pb;
+    },
+
+    pbFetch: function (method, path, body) {
+        var url = ApiClient.getUrl('XtreamLibrary/' + path);
+        var opts = { type: method, url: url, dataType: 'json' };
+        if (body !== undefined) {
+            opts.data = JSON.stringify(body);
+            opts.contentType = 'application/json';
+        }
+        return ApiClient.ajax(opts);
+    },
+
+    pbText: function (el, text) {
+        while (el.firstChild) el.removeChild(el.firstChild);
+        el.appendChild(document.createTextNode(text));
+    },
+
+    pbLine: function (el, text) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(text));
+        el.appendChild(div);
+    },
+
+    renderProviderLimits: function () {
+        var host = document.getElementById('pbProviderLimits');
+        if (!host) return;
+        while (host.firstChild) host.removeChild(host.firstChild);
+        var self = this;
+        this.providers.forEach(function (p, i) {
+            var row = document.createElement('div');
+            row.className = 'inputContainer';
+            var label = document.createElement('label');
+            label.className = 'inputLabel inputLabelUnfocused';
+            label.appendChild(document.createTextNode((p.Name || ('Provider ' + (i + 1))) + ' — streams'));
+            var sel = document.createElement('select');
+            sel.setAttribute('is', 'emby-select');
+            [['Auto', 'Ask the panel'], ['Limited', 'Fixed number'], ['Unlimited', 'No limit']].forEach(function (o) {
+                var opt = document.createElement('option');
+                opt.value = o[0];
+                opt.appendChild(document.createTextNode(o[1]));
+                sel.appendChild(opt);
+            });
+            sel.value = p.StreamLimitMode || 'Auto';
+            var num = document.createElement('input');
+            num.type = 'number'; num.min = '1'; num.max = '50'; num.step = '1';
+            num.value = p.MaxStreams || 1;
+            num.style.display = sel.value === 'Limited' ? '' : 'none';
+            sel.addEventListener('change', function () {
+                p.StreamLimitMode = sel.value;
+                num.style.display = sel.value === 'Limited' ? '' : 'none';
+            });
+            num.addEventListener('change', function () {
+                p.MaxStreams = Math.max(1, parseInt(num.value, 10) || 1);
+            });
+            row.appendChild(label);
+            row.appendChild(sel);
+            row.appendChild(num);
+            host.appendChild(row);
+        });
+        void self;
+    },
+
+    renderMultiviews: function () {
+        var host = document.getElementById('pbMultiviews');
+        if (!host) return;
+        while (host.firstChild) host.removeChild(host.firstChild);
+        var self = this;
+        this.pbMultiviews.forEach(function (m, index) {
+            var box = document.createElement('div');
+            box.className = 'dashboard-card';
+            box.style.marginBottom = '12px';
+
+            var name = document.createElement('input');
+            name.type = 'text'; name.value = m.Name; name.placeholder = 'Name';
+            name.addEventListener('change', function () { m.Name = name.value.trim() || 'Multiview'; });
+
+            var layout = document.createElement('select');
+            [['Grid', 'Grid (equal tiles)'], ['Focus', 'Focus (one large, others small)']].forEach(function (o) {
+                var opt = document.createElement('option');
+                opt.value = o[0];
+                opt.appendChild(document.createTextNode(o[1]));
+                layout.appendChild(opt);
+            });
+            layout.value = m.Layout;
+            layout.addEventListener('change', function () { m.Layout = layout.value; });
+
+            var ids = document.createElement('div');
+            var drawIds = function () {
+                while (ids.firstChild) ids.removeChild(ids.firstChild);
+                m.ChannelIds.forEach(function (id, n) {
+                    var line = document.createElement('div');
+                    var audio = document.createElement('input');
+                    audio.type = 'radio'; audio.name = 'pbAudio' + index; audio.checked = m.AudioIndex === n;
+                    audio.addEventListener('change', function () { m.AudioIndex = n; });
+                    var text = document.createElement('span');
+                    text.appendChild(document.createTextNode(' ' + (m.ChannelNames && m.ChannelNames[id] ? m.ChannelNames[id] + ' ' : '') + '(' + id + ') '));
+                    var drop = document.createElement('button');
+                    drop.type = 'button';
+                    drop.appendChild(document.createTextNode('Remove'));
+                    drop.addEventListener('click', function () {
+                        m.ChannelIds.splice(n, 1);
+                        if (m.AudioIndex >= m.ChannelIds.length) m.AudioIndex = 0;
+                        drawIds();
+                    });
+                    line.appendChild(audio);
+                    line.appendChild(text);
+                    line.appendChild(drop);
+                    ids.appendChild(line);
+                });
+            };
+            drawIds();
+
+            var find = document.createElement('input');
+            find.type = 'text'; find.placeholder = 'Find a channel to add (at least two letters)';
+            var found = document.createElement('div');
+            var timer = null;
+            find.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    while (found.firstChild) found.removeChild(found.firstChild);
+                    if (find.value.trim().length < 2) return;
+                    self.pbFetch('GET', 'PressBox/Channels?q=' + encodeURIComponent(find.value.trim())).then(function (rows) {
+                        rows.forEach(function (r) {
+                            var b = document.createElement('button');
+                            b.type = 'button';
+                            b.appendChild(document.createTextNode(r.Name));
+                            b.addEventListener('click', function () {
+                                if (m.ChannelIds.length >= 4 || m.ChannelIds.indexOf(r.Id) >= 0) return;
+                                m.ChannelIds.push(r.Id);
+                                m.ChannelNames = m.ChannelNames || {};
+                                m.ChannelNames[r.Id] = r.Name;
+                                drawIds();
+                            });
+                            found.appendChild(b);
+                        });
+                    });
+                }, 300);
+            });
+
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.appendChild(document.createTextNode('Delete this multiview'));
+            remove.addEventListener('click', function () {
+                self.pbMultiviews.splice(index, 1);
+                self.renderMultiviews();
+            });
+
+            box.appendChild(name);
+            box.appendChild(layout);
+            var hint = document.createElement('div');
+            hint.className = 'fieldDescription';
+            hint.appendChild(document.createTextNode('Up to four channels. The marked one is the one you hear.'));
+            box.appendChild(hint);
+            box.appendChild(ids);
+            box.appendChild(find);
+            box.appendChild(found);
+            box.appendChild(remove);
+            host.appendChild(box);
+        });
+    },
+
+    addMultiview: function () {
+        this.pbMultiviews.push({
+            Id: this.pbRandomHex(4), Token: this.pbRandomHex(16), Name: 'Multiview ' + (this.pbMultiviews.length + 1),
+            Layout: 'Grid', AudioIndex: 0, ChannelIds: []
+        });
+        this.renderMultiviews();
+    },
+
+    refreshGuideStatus: function () {
+        var out = document.getElementById('pbGuideStatus');
+        var self = this;
+        return this.pbFetch('GET', 'PressBox/Guide').then(function (rows) {
+            while (out.firstChild) out.removeChild(out.firstChild);
+            rows.forEach(function (r) {
+                var text = r.Url + ' — ' + (r.FetchedAt ? ('fetched ' + new Date(r.FetchedAt).toLocaleString() + ', ' + r.Channels + ' channels, ' + r.Programmes + ' listings kept, ' + r.MatchedChannels + ' of your channels matched') : 'not fetched yet');
+                if (r.Error) text += ' — last try failed: ' + r.Error;
+                self.pbLine(out, text);
+            });
+        });
+    },
+
+    refreshLimitStatus: function (refresh) {
+        var out = document.getElementById('pbLimitStatus');
+        var self = this;
+        return this.pbFetch(refresh ? 'POST' : 'GET', refresh ? 'PressBox/StreamLimits/Refresh' : 'PressBox/StreamLimits').then(function (rows) {
+            while (out.firstChild) out.removeChild(out.firstChild);
+            rows.forEach(function (r) {
+                var allowance = r.EffectiveMax == null ? 'no limit' : (r.EffectiveMax + ' stream' + (r.EffectiveMax === 1 ? '' : 's'));
+                var text = r.Name + ': ' + allowance + ', ' + r.Active + ' in use here';
+                if (r.ReportedActive != null) text += ', ' + r.ReportedActive + ' in use on the account';
+                if (r.Error) text += ' (' + r.Error + ')';
+                self.pbLine(out, text);
+            });
+        });
+    },
+
+    loadLanguages: function () {
+        var host = document.getElementById('pbLanguages');
+        var self = this;
+        this.pbText(host, 'Looking…');
+        return this.pbFetch('GET', 'PressBox/Languages?providerIndex=' + this.activeProviderIndex).then(function (res) {
+            while (host.firstChild) host.removeChild(host.firstChild);
+            self.pbLanguageChoices = [];
+            res.Languages.forEach(function (l) {
+                var label = document.createElement('label');
+                label.style.display = 'block';
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.checked = res.Preferred.indexOf(l.Id) >= 0;
+                box.addEventListener('change', function () { self.syncLanguageChoices(); });
+                box.setAttribute('data-language', l.Id);
+                label.appendChild(box);
+                label.appendChild(document.createTextNode(' ' + l.Name + ' — ' + l.Vod + ' movie, ' + l.Series + ' series, ' + l.Live + ' live categories'));
+                host.appendChild(label);
+            });
+            self.syncLanguageChoices();
+            document.getElementById('btnPbApplyLanguages').style.display = res.Languages.length ? '' : 'none';
+        }, function () {
+            self.pbText(host, 'Could not read the provider’s categories. Save the provider settings first.');
+        });
+    },
+
+    syncLanguageChoices: function () {
+        this.pbLanguageChoices = Array.prototype.map.call(
+            document.querySelectorAll('#pbLanguages input[data-language]:checked'),
+            function (b) { return b.getAttribute('data-language'); });
+    },
+
+    applyLanguages: function () {
+        var out = document.getElementById('pbLanguageResult');
+        var self = this;
+        this.syncLanguageChoices();
+        if (!this.pbLanguageChoices.length) {
+            this.pbText(out, 'Choose at least one language.');
+            return;
+        }
+        this.pbFetch('POST', 'PressBox/Languages/Apply', {
+            ProviderIndex: this.activeProviderIndex, Languages: this.pbLanguageChoices, IncludeLive: true
+        }).then(function (r) {
+            var text = 'Selected ' + r.Vod + ' movie and ' + r.Series + ' series categories' + (r.Live ? (' and ' + r.Live + ' live categories') : '') + '.';
+            if (r.LiveSkipped) text += ' Live categories were left alone because Live TV is not in custom channel mode.';
+            self.pbText(out, text + ' Reload this page to see the selection on the Movies, Series and Live TV tabs.');
+        }, function () {
+            self.pbText(out, 'Could not apply. Save the provider settings first.');
+        });
+    },
+
+    showSlate: function () {
+        var out = document.getElementById('pbSportsOutput');
+        var self = this;
+        this.pbText(out, 'Looking…');
+        this.pbFetch('GET', 'PressBox/Sports/Slate').then(function (games) {
+            while (out.firstChild) out.removeChild(out.firstChild);
+            if (!games.length) self.pbLine(out, 'No games today in the leagues you follow.');
+            games.forEach(function (g) {
+                var home = g.Home ? g.Home.Name : '';
+                var away = g.Away ? g.Away.Name : '';
+                self.pbLine(out, new Date(g.StartMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ' — ' + (g.Name || (away + ' at ' + home)) + ' (' + g.LeagueLabel + ', ' + (g.Status || g.State) + ')');
+            });
+        }, function () {
+            self.pbText(out, 'Sports is switched off, or ESPN could not be reached. Save with it ticked first.');
+        });
+    },
+
+    showTrending: function () {
+        var out = document.getElementById('pbSportsOutput');
+        var self = this;
+        this.pbText(out, 'Looking…');
+        this.pbFetch('GET', 'PressBox/Trending').then(function (items) {
+            while (out.firstChild) out.removeChild(out.firstChild);
+            if (!items.length) self.pbLine(out, 'Nothing stands out right now.');
+            items.slice(0, 20).forEach(function (t) {
+                self.pbLine(out, t.Title + (t.Subtitle ? ' — ' + t.Subtitle : '') + ' [' + t.Reasons.join(', ') + ']');
+            });
+        }, function () {
+            self.pbText(out, 'Trending is switched off. Save with it ticked first.');
+        });
+    },
+
+    bindPressbox: function () {
+        var self = this;
+        var bind = function (id, fn) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('click', function (e) { e.preventDefault(); fn.call(self); });
+        };
+        bind('btnPbGuideRefresh', function () {
+            self.pbText(document.getElementById('pbGuideStatus'), 'Fetching… this can take a few minutes for large guides.');
+            self.pbFetch('POST', 'PressBox/Guide/Refresh').then(function () { self.refreshGuideStatus(); }, function () {
+                self.pbText(document.getElementById('pbGuideStatus'), 'Could not fetch. Save the settings first, then try again.');
+            });
+        });
+        bind('btnPbLimitsRefresh', function () { self.refreshLimitStatus(true); });
+        bind('btnPbLoadLanguages', this.loadLanguages);
+        bind('btnPbApplyLanguages', this.applyLanguages);
+        bind('btnPbShowSlate', this.showSlate);
+        bind('btnPbShowTrending', this.showTrending);
+        bind('btnPbAddMultiview', this.addMultiview);
+    },
+
 
     loadConfig: function () {
         Dashboard.showLoadingMsg();
@@ -331,6 +716,7 @@ var XtreamLibraryConfig = (function () {
             self.activeProviderIndex = 0;
             self.renderProviderSelector();
             self.loadProviderIntoUI(0);
+            self.loadPressbox(config);
 
             // Global settings (not per-provider)
             document.getElementById('txtSyncInterval').value = config.SyncIntervalMinutes || 60;
@@ -488,6 +874,8 @@ var XtreamLibraryConfig = (function () {
             config.CatchupBlockMinutes = isNaN(catchupBlock) ? 30 : catchupBlock;
             var catchupShift = parseInt(document.getElementById('txtCatchupTimeShiftMinutes').value);
             config.CatchupTimeShiftMinutes = isNaN(catchupShift) ? 0 : catchupShift;
+
+            self.savePressbox(config);
 
             ApiClient.updatePluginConfiguration(self.pluginUniqueId, config).then(function () {
                 self.updateEmptyState();
@@ -2749,6 +3137,8 @@ function initXtreamLibraryConfig() {
     const btnSync = document.getElementById('btnManualSync');
     const btnLoadVodCategories = document.getElementById('btnLoadVodCategories');
     const btnLoadSeriesCategories = document.getElementById('btnLoadSeriesCategories');
+
+    XtreamLibraryConfig.bindPressbox();
 
     // Tab switching
     document.querySelectorAll('.xtream-tab').forEach(function (tab) {

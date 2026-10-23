@@ -46,6 +46,8 @@ public class LiveTvService : IDisposable
     private readonly IServerApplicationPaths _appPaths;
     private readonly IServerApplicationHost _appHost;
     private readonly ILogger<LiveTvService> _logger;
+    private readonly Pressbox.DefaultGuideService? _defaultGuide;
+    private readonly Pressbox.SportsService? _sports;
     private readonly SemaphoreSlim _m3uLock = new(1, 1);
     private readonly SemaphoreSlim _epgLock = new(1, 1);
     private readonly SemaphoreSlim _snapshotLock = new(1, 1);
@@ -68,8 +70,17 @@ public class LiveTvService : IDisposable
     /// <param name="appPaths">The Jellyfin application paths (used to locate the channel snapshot file).</param>
     /// <param name="appHost">The Jellyfin application host (used to resolve the server base URL for channel-logo proxy links).</param>
     /// <param name="logger">The logger instance.</param>
-    public LiveTvService(IXtreamClient client, IDispatcharrClient dispatcharrClient, IServerApplicationPaths appPaths, IServerApplicationHost appHost, ILogger<LiveTvService> logger)
+    /// <param name="defaultGuide">The default guide service, which fills in channels the provider has no guide for (optional).</param>
+    /// <param name="sports">The sports service, which writes listings for game channels (optional).</param>
+    public LiveTvService(IXtreamClient client, IDispatcharrClient dispatcharrClient, IServerApplicationPaths appPaths, IServerApplicationHost appHost, ILogger<LiveTvService> logger, Pressbox.DefaultGuideService? defaultGuide = null, Pressbox.SportsService? sports = null)
     {
+        _sports = sports;
+        _defaultGuide = defaultGuide;
+        if (_defaultGuide is not null)
+        {
+            _defaultGuide.Updated += (_, _) => InvalidateCache();
+        }
+
         _client = client;
         _dispatcharrClient = dispatcharrClient;
         _appPaths = appPaths;
@@ -561,7 +572,7 @@ public class LiveTvService : IDisposable
     /// fetched server-side, so the loopback/LAN URL is sufficient and is stable across requests
     /// (keeping the cached M3U/EPG coherent). Returns an empty string if it cannot be resolved.
     /// </summary>
-    private string GetServerBaseUrl()
+    internal string GetServerBaseUrl()
     {
         try
         {
@@ -989,6 +1000,12 @@ public class LiveTvService : IDisposable
                 config.ChannelRemoveTerms,
                 config.EnableChannelNameCleaning);
 
+            var m3uOverlay = _defaultGuide?.OverlayFor(XtreamTunerHost.BuildChannelId(channel.ProviderIndex, channel.StreamId)) ?? (null, null);
+            if (m3uOverlay.Item1 is not null)
+            {
+                cleanName = m3uOverlay.Item1;
+            }
+
             var epgId = !string.IsNullOrEmpty(channel.EpgChannelId) ? channel.EpgChannelId : channel.StreamId.ToString(CultureInfo.InvariantCulture);
 
             var extinf = new StringBuilder();
@@ -998,6 +1015,11 @@ public class LiveTvService : IDisposable
             extinf.Append(CultureInfo.InvariantCulture, $" tvg-chno=\"{ChannelNumbering.Resolve(channel, stride, numberByCategory)}\"");
 
             var logoUrl = ChannelLogoResolver.ResolveDisplayUrl(channel.StreamIcon, channel.StreamId, baseUrl);
+            if (string.IsNullOrEmpty(channel.StreamIcon) && m3uOverlay.Item2 is not null)
+            {
+                logoUrl = m3uOverlay.Item2;
+            }
+
             if (!string.IsNullOrEmpty(logoUrl))
             {
                 extinf.Append(CultureInfo.InvariantCulture, $" tvg-logo=\"{EscapeAttribute(logoUrl)}\"");
@@ -1265,6 +1287,7 @@ public class LiveTvService : IDisposable
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
         sb.AppendLine("<tv generator-info-name=\"Jellyfin Xtream Library\">");
+        _defaultGuide?.Update(channels);
 
         // Channel definitions
         int epgStride = ChannelNumbering.ComputeStride(channels);
@@ -1278,6 +1301,11 @@ public class LiveTvService : IDisposable
                 config.EnableChannelNameCleaning);
 
             var channelId = XtreamTunerHost.BuildChannelId(channel.ProviderIndex, channel.StreamId);
+            var overlay = _defaultGuide?.OverlayFor(channelId) ?? (null, null);
+            if (overlay.Item1 is not null)
+            {
+                cleanName = overlay.Item1;
+            }
 
             sb.Append(CultureInfo.InvariantCulture, $"  <channel id=\"{EscapeXml(channelId)}\">\n");
             sb.Append(CultureInfo.InvariantCulture, $"    <display-name>{EscapeXml(cleanName)}</display-name>\n");
@@ -1289,6 +1317,11 @@ public class LiveTvService : IDisposable
             // which picks the wrong guide when two channels clean to the same name (GitHub #147).
             sb.Append(CultureInfo.InvariantCulture, $"    <display-name>{ChannelNumbering.Resolve(channel, epgStride, epgNumberByCategory)}</display-name>\n");
             var iconUrl = ChannelLogoResolver.ResolveDisplayUrl(channel.StreamIcon, channel.StreamId, baseUrl);
+            if (string.IsNullOrEmpty(channel.StreamIcon) && overlay.Item2 is not null)
+            {
+                iconUrl = overlay.Item2;
+            }
+
             if (!string.IsNullOrEmpty(iconUrl))
             {
                 sb.Append(CultureInfo.InvariantCulture, $"    <icon src=\"{EscapeXml(iconUrl)}\" />\n");
@@ -1296,6 +1329,8 @@ public class LiveTvService : IDisposable
 
             sb.AppendLine("  </channel>");
         }
+
+        var programmesStart = sb.Length;
 
         // Fetch EPG data if enabled
         if (config.EnableEpg)
@@ -1377,6 +1412,24 @@ public class LiveTvService : IDisposable
 
                     sb.AppendLine("  </programme>");
                 }
+            }
+        }
+
+        if (config.EnableEpg && _defaultGuide is not null)
+        {
+            var added = _defaultGuide.AppendFallbackProgrammes(sb, programmesStart);
+            if (added > 0)
+            {
+                _logger.LogInformation("Added {Count} programmes from the default guide for channels the provider has none for", added);
+            }
+        }
+
+        if (config.EnableEpg && _sports is not null)
+        {
+            var games = _sports.AppendGameProgrammes(sb, programmesStart, channels);
+            if (games > 0)
+            {
+                _logger.LogInformation("Added {Count} game listings for channels named for a game", games);
             }
         }
 

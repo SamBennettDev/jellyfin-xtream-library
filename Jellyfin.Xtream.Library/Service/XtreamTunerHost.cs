@@ -46,13 +46,22 @@ public class XtreamTunerHost : ITunerHost
     internal const string TunerType = "xtream-library";
 
     internal const string ChannelIdPrefix = "xtream_";
+
+    /// <summary>
+    /// Tuner channel ids of multiviews start with this.
+    /// </summary>
+    internal const string MultiviewChannelPrefix = "xtream_mv_";
+
     private const string JellyfinTunerPrefix = "hdhr_";
+    private const int MultiviewFirstNumber = 9001;
 
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private readonly LiveTvService _liveTvService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<XtreamTunerHost> _logger;
+    private readonly Pressbox.DefaultGuideService? _defaultGuide;
+    private readonly Pressbox.StreamLimitService? _streamLimits;
     private volatile Dictionary<string, string> _channelNumberToChannelId = new();
     private volatile Dictionary<string, StreamStatsInfo> _streamStats = new();
     private volatile Dictionary<string, string> _dispatcharrUuids = new();
@@ -66,11 +75,17 @@ public class XtreamTunerHost : ITunerHost
     /// <param name="liveTvService">The Live TV service for channel data.</param>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
     /// <param name="logger">The logger instance.</param>
+    /// <param name="defaultGuide">The default guide service, whose names and logos are shown for matched channels (optional).</param>
+    /// <param name="streamLimits">The stream limit service, which keeps a viewer from using more of a provider's streams than it has (optional).</param>
     public XtreamTunerHost(
         LiveTvService liveTvService,
         IHttpClientFactory httpClientFactory,
-        ILogger<XtreamTunerHost> logger)
+        ILogger<XtreamTunerHost> logger,
+        Pressbox.DefaultGuideService? defaultGuide = null,
+        Pressbox.StreamLimitService? streamLimits = null)
     {
+        _defaultGuide = defaultGuide;
+        _streamLimits = streamLimits;
         _liveTvService = liveTvService;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
@@ -157,12 +172,21 @@ public class XtreamTunerHost : ITunerHost
                 config.ChannelRemoveTerms,
                 config.EnableChannelNameCleaning);
 
+            // The same name and logo the XMLTV file carries: Jellyfin pairs a guide with a channel by
+            // name and number, so the two must agree.
+            var overlay = _defaultGuide?.OverlayFor(channelId) ?? (null, null);
+            var imageUrl = _liveTvService.ResolveChannelLogoUrl(channel.StreamIcon, channel.StreamId);
+            if (string.IsNullOrEmpty(channel.StreamIcon) && overlay.Item2 is not null)
+            {
+                imageUrl = overlay.Item2;
+            }
+
             result.Add(new ChannelInfo
             {
                 Id = channelId,
-                Name = cleanName,
+                Name = overlay.Item1 ?? cleanName,
                 Number = channelNumber,
-                ImageUrl = _liveTvService.ResolveChannelLogoUrl(channel.StreamIcon, channel.StreamId),
+                ImageUrl = imageUrl,
                 // GitHub #112. Jellyfin keeps radio in its own section, so a station filed as TV
                 // is not just mislabelled, it is in the wrong list entirely.
                 ChannelType = LiveStreamKind.IsRadio(channel.StreamType) ? ChannelType.Radio : ChannelType.TV,
@@ -173,6 +197,8 @@ public class XtreamTunerHost : ITunerHost
                 Tags = channel.Tags,
             });
         }
+
+        AddMultiviewChannels(result, newMap);
 
         _channelNumberToChannelId = newMap;
         _streamStats = newStats;
@@ -194,6 +220,13 @@ public class XtreamTunerHost : ITunerHost
     {
         await EnsureChannelsLoadedAsync(cancellationToken).ConfigureAwait(false);
 
+        if (TryGetMultiview(channelId, out var multiview))
+        {
+            var mvConfig = Plugin.Instance.Configuration;
+            var mvSource = CreateMediaSourceInfo(Pressbox.MultiviewService.ChannelIdOf(multiview), MultiviewStreamUrl(multiview), null, false, mvConfig, _logger);
+            return new List<MediaSourceInfo> { mvSource };
+        }
+
         if (!TryParseChannelId(channelId, out var providerIndex, out var streamId))
         {
             return new List<MediaSourceInfo>();
@@ -214,6 +247,13 @@ public class XtreamTunerHost : ITunerHost
     {
         await EnsureChannelsLoadedAsync(cancellationToken).ConfigureAwait(false);
 
+        if (TryGetMultiview(channelId, out var multiview))
+        {
+            // The mosaic holds its own tiles' streams while it runs (MultiviewService), so no lease here.
+            var mvSource = CreateMediaSourceInfo(Pressbox.MultiviewService.ChannelIdOf(multiview), MultiviewStreamUrl(multiview), null, false, Plugin.Instance.Configuration, _logger);
+            return new XtreamLiveStream(mvSource, _httpClientFactory.CreateClient(), _logger);
+        }
+
         if (!TryParseChannelId(channelId, out var providerIndex, out var parsedStreamId))
         {
             throw new System.IO.FileNotFoundException($"Channel {channelId} not found in Xtream tuner");
@@ -227,7 +267,11 @@ public class XtreamTunerHost : ITunerHost
         var mediaSource = CreateMediaSourceInfo(canonicalChannelId, streamUrl, stats, isHls, config, _logger);
 
         var httpClient = _httpClientFactory.CreateClient();
-        ILiveStream liveStream = new XtreamLiveStream(mediaSource, httpClient, _logger);
+
+        // Takes a stream on the provider's account, or refuses when it has none free. The live stream
+        // gives it back when Jellyfin closes it. A refusal surfaces as the playback error Jellyfin shows.
+        var lease = _streamLimits?.Open(providerIndex, canonicalChannelId);
+        ILiveStream liveStream = new XtreamLiveStream(mediaSource, httpClient, _logger, _streamLimits, lease);
 
         _logger.LogInformation("Opening live stream for channel {ChannelId} (stream {StreamId})", channelId, parsedStreamId);
 
@@ -238,6 +282,92 @@ public class XtreamTunerHost : ITunerHost
     public Task<List<TunerHostInfo>> DiscoverDevices(int discoveryDurationMs, CancellationToken cancellationToken)
     {
         return Task.FromResult(new List<TunerHostInfo>());
+    }
+
+    /// <summary>
+    /// Resolves a tuner channel id to the stream address and provider of a lineup channel, for a multiview's tiles.
+    /// </summary>
+    /// <param name="channelId">The channel id.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns>The address and provider index, or null when the channel is not in the lineup.</returns>
+    internal async Task<(string Url, int ProviderIndex)?> ResolveTileAsync(string channelId, CancellationToken cancellationToken)
+    {
+        await EnsureChannelsLoadedAsync(cancellationToken).ConfigureAwait(false);
+        if (!TryParseChannelId(channelId, out var providerIndex, out var streamId))
+        {
+            return null;
+        }
+
+        var canonical = BuildChannelId(providerIndex, streamId);
+        var (url, _) = ResolveStreamUrl(Plugin.Instance.Configuration, providerIndex, streamId, canonical);
+        return (url, providerIndex);
+    }
+
+    private string MultiviewStreamUrl(MultiviewDefinition multiview)
+        => _liveTvService.GetServerBaseUrl().TrimEnd('/') + "/XtreamLibrary/Multiview/" + multiview.Token + "/stream.ts";
+
+    private bool TryGetMultiview(string channelId, out MultiviewDefinition multiview)
+    {
+        multiview = null!;
+        var settings = Plugin.Instance.Configuration.Pressbox;
+        if (!settings.EnableMultiview)
+        {
+            return false;
+        }
+
+        var id = channelId;
+        if (id.StartsWith(JellyfinTunerPrefix, StringComparison.Ordinal)
+            && _channelNumberToChannelId.TryGetValue(id.Substring(JellyfinTunerPrefix.Length), out var mapped))
+        {
+            id = mapped;
+        }
+
+        if (!id.StartsWith(MultiviewChannelPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var found = settings.Multiviews.FirstOrDefault(m => string.Equals(m.Id, id.Substring(MultiviewChannelPrefix.Length), StringComparison.Ordinal));
+        if (found is null)
+        {
+            return false;
+        }
+
+        multiview = found;
+        return true;
+    }
+
+    private void AddMultiviewChannels(List<ChannelInfo> result, Dictionary<string, string> numberMap)
+    {
+        var settings = Plugin.Instance.Configuration.Pressbox;
+        if (!settings.EnableMultiview)
+        {
+            return;
+        }
+
+        var number = MultiviewFirstNumber;
+        foreach (var mv in settings.Multiviews)
+        {
+            var id = Pressbox.MultiviewService.ChannelIdOf(mv);
+            var text = number.ToString(CultureInfo.InvariantCulture);
+            while (numberMap.ContainsKey(text))
+            {
+                number++;
+                text = number.ToString(CultureInfo.InvariantCulture);
+            }
+
+            numberMap[text] = id;
+            result.Add(new ChannelInfo
+            {
+                Id = id,
+                Name = mv.Name,
+                Number = text,
+                ChannelType = ChannelType.TV,
+                TunerHostId = Type,
+                ChannelGroup = "Multiview",
+            });
+            number++;
+        }
     }
 
     private async Task EnsureChannelsLoadedAsync(CancellationToken cancellationToken)

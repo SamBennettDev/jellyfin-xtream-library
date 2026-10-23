@@ -27,6 +27,15 @@ A Jellyfin plugin that syncs Xtream VOD, Series, and Live TV content to native J
 - **Category Grouping**: Channels are tagged with their Xtream category so the Live TV guide groups them instead of showing one flat list (native tuner `ChannelGroup` / M3U `group-title`)
 - **Dispatcharr Integration**: Enhanced stream stats and multi-variant stream support
 
+### PressBox features (fork)
+Off until switched on in the **PressBox** tab; see [docs/PRESSBOX.md](docs/PRESSBOX.md).
+- **Default guide**: free guides matched to channels the provider has no guide for, only when certain (id, call sign or exact name)
+- **Category languages**: select the movie, series and live categories in the languages you read
+- **Stream limits**: keep within each provider's connection limit, and let the library sync wait for a quiet minute
+- **Sports**: today's games from ESPN and the channels showing them
+- **Trending**: what is on now, ranked, and an optional "Trending Now" collection
+- **Multiview**: up to four channels in one picture, offered as a Live TV channel
+
 ### Sync Options
 - **Category Filtering**: Select specific VOD, Series, and Live TV categories to sync
 - **Per-Item Selection**: Expand any Movie or Series category (Single folder mode) to enable or disable individual titles, the same way Live TV lets you pick individual channels
@@ -233,6 +242,8 @@ Once enabled, go to **Dashboard → Live TV** in Jellyfin — the Xtream Library
 | `/XtreamLibrary/Epg.xml` | GET | XMLTV EPG data (no auth) |
 | `/XtreamLibrary/Catchup.m3u` | GET | Catch-up channels M3U (no auth; only with Publish Playlists on) |
 | `/XtreamLibrary/ChannelLogo/{streamId}` | GET | Serve a local-path channel override logo (no auth) |
+| `/XtreamLibrary/PressBox/...` | various | PressBox features, see [docs/PRESSBOX.md](docs/PRESSBOX.md) |
+| `/XtreamLibrary/Multiview/{token}/stream.ts` | GET | A multiview's mosaic (no auth; the token is the secret) |
 
 ## Scheduled Task
 

@@ -35,6 +35,9 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     private readonly object _connectLock = new();
     private HttpResponseMessage? _response;
     private Stream? _stream;
+    private readonly Pressbox.StreamLimitService? _limits;
+    private readonly Pressbox.StreamLease? _lease;
+    private readonly Timer? _heartbeat;
     private bool _disposed;
 
     /// <summary>
@@ -43,8 +46,19 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
     /// <param name="mediaSource">The media source info with stream URL in Path.</param>
     /// <param name="httpClient">The HTTP client for streaming.</param>
     /// <param name="logger">The logger instance.</param>
-    public XtreamLiveStream(MediaSourceInfo mediaSource, HttpClient httpClient, ILogger logger)
+    /// <param name="limits">The stream limit service the lease belongs to (optional).</param>
+    /// <param name="lease">The provider stream held for as long as this stream is open (optional).</param>
+    public XtreamLiveStream(MediaSourceInfo mediaSource, HttpClient httpClient, ILogger logger, Pressbox.StreamLimitService? limits = null, Pressbox.StreamLease? lease = null)
     {
+        _limits = limits;
+        _lease = lease;
+        if (limits is not null)
+        {
+            // A lease expires after 90 s unless held, and a channel is watched for hours. Without a
+            // lease it still tells the sync task that someone is watching.
+            _heartbeat = new Timer(_ => limits.Hold(lease), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        }
+
         MediaSource = mediaSource;
         _httpClient = httpClient;
         _logger = logger;
@@ -175,6 +189,8 @@ internal sealed class XtreamLiveStream : ILiveStream, IDisposable
         {
             if (!_disposed)
             {
+                _heartbeat?.Dispose();
+                _limits?.Close(_lease);
                 _stream?.Dispose();
                 _response?.Dispose();
                 _disposed = true;

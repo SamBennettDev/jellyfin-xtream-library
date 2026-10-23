@@ -14,6 +14,8 @@ Jellyfin.Xtream.Library/
 │   ├── XtreamClient.cs
 │   └── Models/                     # API response models
 ├── Service/StrmSyncService.cs      # Core sync logic
+├── Service/Pressbox/               # PressBox features (docs/PRESSBOX.md): guide matching, stream budget, sports, trending, multiview
+├── Api/PressboxController.cs       # PressBox endpoints (admin) and the multiview stream (token)
 ├── Tasks/SyncLibraryTask.cs        # Scheduled task
 ├── Configuration/Web/              # Embedded config UI
 │   ├── config.html

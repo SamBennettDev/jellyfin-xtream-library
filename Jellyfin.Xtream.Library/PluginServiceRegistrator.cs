@@ -41,7 +41,17 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SnapshotService>();
         serviceCollection.AddSingleton<StrmSyncService>();
         serviceCollection.AddSingleton<LiveTvService>();
-        serviceCollection.AddSingleton<ITunerHost, XtreamTunerHost>();
+        serviceCollection.AddSingleton<XtreamTunerHost>();
+        serviceCollection.AddSingleton<ITunerHost>(sp => sp.GetRequiredService<XtreamTunerHost>());
+
+        // PressBox features. Each is off until switched on in the settings.
+        serviceCollection.AddSingleton<Service.Pressbox.PlaybackActivity>();
+        serviceCollection.AddSingleton<Service.Pressbox.StreamLimitService>();
+        serviceCollection.AddSingleton<Service.Pressbox.DefaultGuideService>();
+        serviceCollection.AddSingleton<Service.Pressbox.SportsService>();
+        serviceCollection.AddSingleton<Service.Pressbox.TrendingService>();
+        serviceCollection.AddSingleton<Service.Pressbox.TrendingCollectionService>();
+        serviceCollection.AddSingleton<Service.Pressbox.MultiviewService>();
         serviceCollection.AddSingleton<CatchupEpgCache>();
 
         // Registered whatever the settings say, and gated at runtime in IsEnabledFor. Skipping the
@@ -49,6 +59,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // the next scan, taking watched state with it (GitHub #108).
         serviceCollection.AddSingleton<IChannel, XtreamCatchupChannel>();
         serviceCollection.AddSingleton<IScheduledTask, SyncLibraryTask>();
+        serviceCollection.AddSingleton<IScheduledTask, TrendingCollectionTask>();
         serviceCollection.AddHostedService<Service.BetaChannelManager>();
         serviceCollection.AddHostedService<Service.NativeTunerRegistration>();
         serviceCollection.AddHostedService<Service.NativeTunerWarmup>();

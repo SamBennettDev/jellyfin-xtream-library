@@ -57,6 +57,22 @@ public class ProviderConfig
     public string UserAgent { get; set; } = string.Empty;
 
     // =====================
+    // Stream limit
+    // =====================
+
+    /// <summary>
+    /// Gets or sets how the number of simultaneous live streams on this provider is limited:
+    /// "Auto" (the panel's own maximum, when it reports one), "Limited" (<see cref="MaxStreams"/>) or "Unlimited".
+    /// Providers on the same server and username share their strictest limit.
+    /// </summary>
+    public string StreamLimitMode { get; set; } = "Auto";
+
+    /// <summary>
+    /// Gets or sets the allowance used when <see cref="StreamLimitMode"/> is "Limited".
+    /// </summary>
+    public int MaxStreams { get; set; } = 1;
+
+    // =====================
     // Output
     // =====================
 
@@ -346,5 +362,12 @@ public class ProviderConfig
         OrphanSafetyThreshold = Math.Clamp(OrphanSafetyThreshold, 0.0, 1.0);
 
         FullSyncIntervalDays = Math.Clamp(FullSyncIntervalDays, 1, 30);
+
+        MaxStreams = Math.Clamp(MaxStreams, 1, 1000);
+        if (!string.Equals(StreamLimitMode, "Limited", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(StreamLimitMode, "Unlimited", StringComparison.OrdinalIgnoreCase))
+        {
+            StreamLimitMode = "Auto";
+        }
     }
 }
