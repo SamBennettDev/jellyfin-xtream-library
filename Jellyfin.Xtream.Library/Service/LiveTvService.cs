@@ -148,7 +148,7 @@ public class LiveTvService : IDisposable
             _logger.LogInformation("Generating M3U playlist");
             var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
             var categoryNames = await GetCategoryNameMapAsync(cancellationToken).ConfigureAwait(false);
-            var m3u = GenerateM3U(channels, config, catchupOnly: false, GetServerBaseUrl(), categoryNames);
+            var m3u = GenerateM3U(channels, config, catchupOnly: false, GetServerBaseUrl(), categoryNames, _defaultGuide);
             ReportCredentialExposure(channels, config, catchupOnly: false);
 
             _cachedM3U = m3u;
@@ -195,7 +195,7 @@ public class LiveTvService : IDisposable
             _logger.LogInformation("Generating Catchup M3U playlist");
             var channels = await GetFilteredChannelsAsync(cancellationToken).ConfigureAwait(false);
             var categoryNames = await GetCategoryNameMapAsync(cancellationToken).ConfigureAwait(false);
-            var m3u = GenerateM3U(channels, config, catchupOnly: true, GetServerBaseUrl(), categoryNames);
+            var m3u = GenerateM3U(channels, config, catchupOnly: true, GetServerBaseUrl(), categoryNames, _defaultGuide);
             ReportCredentialExposure(channels, config, catchupOnly: true);
 
             _cachedCatchupM3U = m3u;
@@ -311,7 +311,7 @@ public class LiveTvService : IDisposable
         // answers these requests: a count that fires on the rare path describes the rare file.
         ReportCredentialExposure(channels, config, catchupOnly);
 
-        return GenerateM3U(channels, config, catchupOnly, GetServerBaseUrl(), snapshot.Categories);
+        return GenerateM3U(channels, config, catchupOnly, GetServerBaseUrl(), snapshot.Categories, _defaultGuide);
     }
 
     /// <summary>
@@ -983,7 +983,7 @@ public class LiveTvService : IDisposable
         return channels.Where(c => !excluded.Contains(c.StreamId)).ToList();
     }
 
-    internal static string GenerateM3U(List<LiveStreamInfo> channels, PluginConfiguration config, bool catchupOnly, string baseUrl, IReadOnlyDictionary<int, string> categoryNames)
+    internal static string GenerateM3U(List<LiveStreamInfo> channels, PluginConfiguration config, bool catchupOnly, string baseUrl, IReadOnlyDictionary<int, string> categoryNames, Pressbox.DefaultGuideService? defaultGuide = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#EXTM3U");
@@ -1000,7 +1000,7 @@ public class LiveTvService : IDisposable
                 config.ChannelRemoveTerms,
                 config.EnableChannelNameCleaning);
 
-            var m3uOverlay = _defaultGuide?.OverlayFor(XtreamTunerHost.BuildChannelId(channel.ProviderIndex, channel.StreamId)) ?? (null, null);
+            var m3uOverlay = defaultGuide?.OverlayFor(XtreamTunerHost.BuildChannelId(channel.ProviderIndex, channel.StreamId)) ?? (null, null);
             if (m3uOverlay.Item1 is not null)
             {
                 cleanName = m3uOverlay.Item1;

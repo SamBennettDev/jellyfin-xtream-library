@@ -114,7 +114,7 @@ public sealed class TrendingCollectionService
             return wanted.Count;
         }
 
-        var current = existing.GetLinkedChildren().Select(c => c.Id).ToList();
+        var current = ((Folder)existing).GetLinkedChildren().Select(c => c.Id).ToList();
         var stale = current.Except(wanted).ToList();
         var fresh = wanted.Except(current).ToList();
         if (stale.Count > 0)
