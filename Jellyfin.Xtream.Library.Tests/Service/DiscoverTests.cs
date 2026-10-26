@@ -163,4 +163,25 @@ public class DiscoverTests
         settings.TorrServerUrl.Should().Be("http://torrserver:8090");
         settings.CatalogPath.Should().Be("/x");
     }
+
+    [Fact]
+    public void TheEpisodeLimitKeepsTheNewestEpisodesAcrossSeasons()
+    {
+        var episodes = new List<CatalogEpisode>();
+        for (var season = 1; season <= 3; season++)
+        {
+            for (var episode = 1; episode <= 10; episode++)
+            {
+                episodes.Add(new CatalogEpisode(season, episode, "x", string.Empty, 0));
+            }
+        }
+
+        var kept = DiscoverCatalogService.NewestEpisodes(episodes, 12);
+
+        kept.Should().HaveCount(12);
+        kept.Should().Contain(new CatalogEpisode(3, 10, "x", string.Empty, 0));
+        kept.Should().Contain(new CatalogEpisode(2, 9, "x", string.Empty, 0));
+        kept.Should().NotContain(e => e.Season == 1);
+        DiscoverCatalogService.NewestEpisodes(episodes, 0).Should().HaveCount(30);
+    }
 }

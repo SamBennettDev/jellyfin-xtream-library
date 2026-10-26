@@ -246,7 +246,11 @@ public sealed partial class DiscoverCatalogService : IDisposable
                 }
 
                 var dir = Path.Combine(showsRoot, folder);
+                var capTag = settings.MaxEpisodesPerSeries.ToString(CultureInfo.InvariantCulture);
+                var capFile = Path.Combine(dir, ".episodecap");
                 var fresh = Directory.Exists(dir)
+                    && File.Exists(capFile)
+                    && File.ReadAllText(capFile).Trim() == capTag
                     && Directory.EnumerateFiles(dir, "*.strm", SearchOption.AllDirectories).Any()
                     && DateTime.UtcNow - Directory.GetLastWriteTimeUtc(dir) < SeriesRefreshAge;
                 if (fresh)
@@ -255,20 +259,23 @@ public sealed partial class DiscoverCatalogService : IDisposable
                     return;
                 }
 
-                var episodes = await _tmdb.GetEpisodesAsync(settings, show.TmdbId, cancellationToken).ConfigureAwait(false);
-                if (episodes.Count == 0)
+                var all = await _tmdb.GetEpisodesAsync(settings, show.TmdbId, cancellationToken).ConfigureAwait(false);
+                if (all.Count == 0)
                 {
                     return;
                 }
 
+                var episodes = NewestEpisodes(all, settings.MaxEpisodesPerSeries);
                 Directory.CreateDirectory(dir);
                 var created = 0;
+                var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var episode in episodes)
                 {
                     var seasonDir = Path.Combine(dir, string.Create(CultureInfo.InvariantCulture, $"Season {episode.Season:00}"));
                     Directory.CreateDirectory(seasonDir);
                     var name = SafeName(show.Title) + string.Create(CultureInfo.InvariantCulture, $" - S{episode.Season:00}E{episode.Episode:00}");
                     var path = Path.Combine(seasonDir, name + ".strm");
+                    keep.Add(path);
                     if (!File.Exists(path))
                     {
                         created++;
@@ -277,6 +284,18 @@ public sealed partial class DiscoverCatalogService : IDisposable
                     WriteIfChanged(path, baseUrl + new TitleRef(false, show.TmdbId, episode.Season, episode.Episode).ToPath());
                 }
 
+                // A lower episode limit than before: drop the older placeholders and any season left empty.
+                foreach (var old in Directory.EnumerateFiles(dir, "*.strm", SearchOption.AllDirectories).Where(f => !keep.Contains(f)).ToList())
+                {
+                    File.Delete(old);
+                }
+
+                foreach (var seasonDir in Directory.EnumerateDirectories(dir).Where(d => !Directory.EnumerateFileSystemEntries(d).Any()).ToList())
+                {
+                    Directory.Delete(seasonDir);
+                }
+
+                File.WriteAllText(capFile, capTag);
                 Directory.SetLastWriteTimeUtc(dir, DateTime.UtcNow);
                 Interlocked.Add(ref episodesWritten, created);
                 Interlocked.Increment(ref seriesWritten);
@@ -314,6 +333,19 @@ public sealed partial class DiscoverCatalogService : IDisposable
             result.Removed,
             result.SkippedOwned);
         return result;
+    }
+
+    /// <summary>
+    /// Keeps the newest episodes of a series: the highest seasons first, then the highest episode numbers.
+    /// </summary>
+    /// <param name="episodes">All aired episodes.</param>
+    /// <param name="limit">How many to keep; zero or less keeps all.</param>
+    /// <returns>The episodes to write placeholders for.</returns>
+    public static List<CatalogEpisode> NewestEpisodes(IReadOnlyList<CatalogEpisode> episodes, int limit)
+    {
+        return limit > 0 && episodes.Count > limit
+            ? episodes.OrderByDescending(e => e.Season).ThenByDescending(e => e.Episode).Take(limit).ToList()
+            : episodes.ToList();
     }
 
     private async Task<List<CatalogTitle>> ListCatalogAsync(DiscoverSettings settings, bool movies, int popular, int newest, CancellationToken cancellationToken)

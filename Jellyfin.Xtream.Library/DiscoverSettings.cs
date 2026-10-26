@@ -59,6 +59,12 @@ public class DiscoverSettings
     public int NewestSeries { get; set; }
 
     /// <summary>
+    /// Gets or sets how many of the newest episodes each series keeps. Zero keeps every aired episode. Long-running
+    /// daily shows have thousands of episodes, which slow Jellyfin's scan to a crawl.
+    /// </summary>
+    public int MaxEpisodesPerSeries { get; set; }
+
+    /// <summary>
     /// Gets or sets how many votes a title needs on TMDB to count as popular. It keeps obscure titles out.
     /// </summary>
     public int MinVotes { get; set; } = 500;
@@ -153,6 +159,7 @@ public class DiscoverSettings
         NewestMovies = Math.Clamp(NewestMovies, 0, 10000);
         MaxSeries = Math.Clamp(MaxSeries, 0, 5000);
         NewestSeries = Math.Clamp(NewestSeries, 0, 10000);
+        MaxEpisodesPerSeries = Math.Clamp(MaxEpisodesPerSeries, 0, 20000);
         MinVotes = Math.Clamp(MinVotes, 0, 100000);
         NewestMinVotes = Math.Clamp(NewestMinVotes, 0, 100000);
         MinSeeders = Math.Clamp(MinSeeders, 0, 1000);

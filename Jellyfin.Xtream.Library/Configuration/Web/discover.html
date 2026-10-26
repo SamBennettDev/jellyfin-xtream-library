@@ -47,6 +47,16 @@
                     <input is="emby-input" type="number" id="dMaxSeries" label="Most series to list" min="0" max="5000" />
                 </div>
                 <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dNewestMovies" label="Newest movies to add" min="0" max="10000" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dNewestSeries" label="Newest series to add" min="0" max="10000" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMaxEpisodes" label="Newest episodes kept per series (0 = all)" min="0" />
+                    <div class="fieldDescription">Long-running daily shows have thousands of episodes. Keeping only the newest makes scans far faster.</div>
+                </div>
+                <div class="inputContainer">
                     <input is="emby-input" type="number" id="dMinVotes" label="Minimum TMDB votes" min="0" />
                     <div class="fieldDescription">Keeps obscure titles out. Raise it for a shorter, better-known catalog.</div>
                 </div>
@@ -80,7 +90,7 @@
             var page = document.querySelector('#XtreamDiscoverPage');
             var ids = { Enabled: 'dEnabled', TmdbApiKey: 'dTmdbKey', TorrServerUrl: 'dTorrServer', RadarrUrl: 'dRadarrUrl',
                 RadarrApiKey: 'dRadarrKey', SonarrUrl: 'dSonarrUrl', SonarrApiKey: 'dSonarrKey', MaxMovies: 'dMaxMovies',
-                MaxSeries: 'dMaxSeries', MinVotes: 'dMinVotes', MinSeeders: 'dMinSeeders', MaxSizeGb: 'dMaxSizeGb',
+                MaxSeries: 'dMaxSeries', NewestMovies: 'dNewestMovies', NewestSeries: 'dNewestSeries', MaxEpisodesPerSeries: 'dMaxEpisodes', MinVotes: 'dMinVotes', MinSeeders: 'dMinSeeders', MaxSizeGb: 'dMaxSizeGb',
                 KeepAfterStreaming: 'dKeep' };
             function el(id) { return page.querySelector('#' + id); }
             function say(text) { el('dOutput').textContent = text; }
