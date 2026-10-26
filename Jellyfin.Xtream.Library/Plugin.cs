@@ -381,9 +381,10 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         Console.WriteLine($"[Xtream.Library.OrphanImport] {message}");
     }
 
-    private static PluginPageInfo CreateStatic(string name, bool enableInMainMenu = false) => new()
+    private static PluginPageInfo CreateStatic(string name, bool enableInMainMenu = false, string? displayName = null) => new()
     {
         Name = name,
+        DisplayName = displayName,
         EnableInMainMenu = enableInMainMenu,
         EmbeddedResourcePath = string.Format(
             CultureInfo.InvariantCulture,
@@ -402,6 +403,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             // Dashboard → Plugins → Xtream Library path.
             CreateStatic("config.html", enableInMainMenu: true),
             CreateStatic("config.js"),
+            CreateStatic("discover.html", enableInMainMenu: true, displayName: "Xtream Discover"),
         };
     }
 }

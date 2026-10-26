@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Xtream Discover</title>
+</head>
+<body>
+<div id="XtreamDiscoverPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <h2>Discover</h2>
+            <p>Lists popular English movies and series from TMDB as two libraries, <b>Discover Movies</b> and
+                <b>Discover Shows</b>, leaving out whatever Radarr and Sonarr already hold. Press play on a title
+                and the plugin finds releases through Radarr or Sonarr, shows them in the client's version picker,
+                and streams the one you pick through TorrServer, so you can scrub and resume.</p>
+            <form id="discoverForm">
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input is="emby-checkbox" type="checkbox" id="dEnabled" />
+                        <span>Enable Discover</span>
+                    </label>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="password" id="dTmdbKey" label="TMDB API key (v3 key or v4 read token)" />
+                    <div class="fieldDescription">Free from themoviedb.org, under Settings, API.</div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="dTorrServer" label="TorrServer address" placeholder="http://torrserver:8090" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="dRadarrUrl" label="Radarr address" placeholder="http://radarr:7878" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="password" id="dRadarrKey" label="Radarr API key" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="dSonarrUrl" label="Sonarr address" placeholder="http://sonarr:8989" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="password" id="dSonarrKey" label="Sonarr API key" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMaxMovies" label="Most movies to list" min="0" max="20000" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMaxSeries" label="Most series to list" min="0" max="5000" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMinVotes" label="Minimum TMDB votes" min="0" />
+                    <div class="fieldDescription">Keeps obscure titles out. Raise it for a shorter, better-known catalog.</div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMinSeeders" label="Fewest seeders offered" min="0" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="dMaxSizeGb" label="Largest release offered (GB, 0 = no limit)" min="0" />
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input is="emby-checkbox" type="checkbox" id="dKeep" />
+                        <span>Also download and keep what I stream</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">Sends the release you play to Radarr or Sonarr, which download and import it. The placeholder is replaced by the real file in your library.</div>
+                </div>
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+                </div>
+                <div style="margin-top:1em">
+                    <button is="emby-button" type="button" class="raised block" id="dTest"><span>Test connections</span></button>
+                    <button is="emby-button" type="button" class="raised block" id="dSync"><span>Sync catalog now</span></button>
+                </div>
+                <pre id="dOutput" style="margin-top:1em;white-space:pre-wrap"></pre>
+            </form>
+        </div>
+    </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '63ba5fcd-c8ce-421a-83e8-ba0b11030d53';
+            var page = document.querySelector('#XtreamDiscoverPage');
+            var ids = { Enabled: 'dEnabled', TmdbApiKey: 'dTmdbKey', TorrServerUrl: 'dTorrServer', RadarrUrl: 'dRadarrUrl',
+                RadarrApiKey: 'dRadarrKey', SonarrUrl: 'dSonarrUrl', SonarrApiKey: 'dSonarrKey', MaxMovies: 'dMaxMovies',
+                MaxSeries: 'dMaxSeries', MinVotes: 'dMinVotes', MinSeeders: 'dMinSeeders', MaxSizeGb: 'dMaxSizeGb',
+                KeepAfterStreaming: 'dKeep' };
+            function el(id) { return page.querySelector('#' + id); }
+            function say(text) { el('dOutput').textContent = text; }
+            function load() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    var d = config.Discover || {};
+                    Object.keys(ids).forEach(function (key) {
+                        var input = el(ids[key]);
+                        if (input.type === 'checkbox') { input.checked = !!d[key]; } else { input.value = d[key] == null ? '' : d[key]; }
+                    });
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+            function save(event) {
+                event.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.Discover = config.Discover || {};
+                    Object.keys(ids).forEach(function (key) {
+                        var input = el(ids[key]);
+                        if (input.type === 'checkbox') { config.Discover[key] = input.checked; }
+                        else if (input.type === 'number') { config.Discover[key] = parseInt(input.value || '0', 10); }
+                        else { config.Discover[key] = input.value; }
+                    });
+                    return ApiClient.updatePluginConfiguration(pluginId, config);
+                }).then(function (result) { Dashboard.processPluginConfigurationUpdateResult(result); });
+                return false;
+            }
+            function call(method, path, then) {
+                ApiClient.ajax({ type: method, url: ApiClient.getUrl('XtreamLibrary/Discover/' + path), dataType: 'json' })
+                    .then(then, function (error) { say('Request failed: ' + (error && error.statusText ? error.statusText : error)); });
+            }
+            page.addEventListener('pageshow', load);
+            el('discoverForm').addEventListener('submit', save);
+            el('dTest').addEventListener('click', function () {
+                say('Testing...');
+                call('POST', 'Test', function (report) {
+                    say(Object.keys(report).map(function (k) { return k + ': ' + report[k]; }).join('\n'));
+                });
+            });
+            el('dSync').addEventListener('click', function () {
+                call('POST', 'Sync', function () {
+                    say('Sync started. This can take a while; the result shows in the Scheduled Tasks log and below once done.');
+                    var timer = setInterval(function () {
+                        call('GET', 'Status', function (s) {
+                            say((s.running ? 'Running...\n' : 'Done.\n') + 'Last result: ' + s.last);
+                            if (!s.running) { clearInterval(timer); }
+                        });
+                    }, 5000);
+                });
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

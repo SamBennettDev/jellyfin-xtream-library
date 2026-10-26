@@ -74,6 +74,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public PressboxSettings Pressbox { get; set; } = new();
 
+    /// <summary>
+    /// Gets or sets the settings of Discover, the TMDB catalog that is played through Radarr, Sonarr and TorrServer.
+    /// </summary>
+    public DiscoverSettings Discover { get; set; } = new();
+
     // =====================
     // Global: Schedule
     // =====================
@@ -532,6 +537,10 @@ public class PluginConfiguration : BasePluginConfiguration
         // PressBox features
         Pressbox ??= new PressboxSettings();
         Pressbox.Validate();
+
+        // Discover
+        Discover ??= new DiscoverSettings();
+        Discover.Validate();
 
         // Per-provider validation
         foreach (var provider in Providers)

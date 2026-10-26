@@ -54,6 +54,15 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Service.Pressbox.MultiviewService>();
         serviceCollection.AddSingleton<CatchupEpgCache>();
 
+        // Discover: TMDB catalog played through Radarr, Sonarr and TorrServer. Off until switched on.
+        serviceCollection.AddHttpClient<Service.Discover.TmdbClient>();
+        serviceCollection.AddHttpClient<Service.Discover.ArrClient>();
+        serviceCollection.AddHttpClient<Service.Discover.TorrServerClient>();
+        serviceCollection.AddSingleton<Service.Discover.DiscoverResolver>();
+        serviceCollection.AddSingleton<Service.Discover.DiscoverCatalogService>();
+        serviceCollection.AddSingleton<MediaBrowser.Controller.Library.IMediaSourceProvider, Service.Discover.DiscoverSourceProvider>();
+        serviceCollection.AddSingleton<IScheduledTask, DiscoverSyncTask>();
+
         // Registered whatever the settings say, and gated at runtime in IsEnabledFor. Skipping the
         // registration instead would have Jellyfin delete the channel and everything under it on
         // the next scan, taking watched state with it (GitHub #108).
