@@ -39,19 +39,34 @@ public class DiscoverSettings
     public string Language { get; set; } = "en";
 
     /// <summary>
-    /// Gets or sets the most movies the catalog holds.
+    /// Gets or sets how many of the most popular movies the catalog holds.
     /// </summary>
     public int MaxMovies { get; set; } = 3000;
 
     /// <summary>
-    /// Gets or sets the most series the catalog holds.
+    /// Gets or sets how many of the newest movies the catalog adds on top (released already, newest first).
+    /// </summary>
+    public int NewestMovies { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many of the most popular series the catalog holds.
     /// </summary>
     public int MaxSeries { get; set; } = 800;
 
     /// <summary>
-    /// Gets or sets how many votes a title needs on TMDB to be listed. It keeps obscure titles out.
+    /// Gets or sets how many of the newest series the catalog adds on top (aired already, newest first).
+    /// </summary>
+    public int NewestSeries { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many votes a title needs on TMDB to count as popular. It keeps obscure titles out.
     /// </summary>
     public int MinVotes { get; set; } = 500;
+
+    /// <summary>
+    /// Gets or sets how many votes a title needs to be listed among the newest. New titles have few votes yet.
+    /// </summary>
+    public int NewestMinVotes { get; set; } = 3;
 
     /// <summary>
     /// Gets or sets the folder the placeholder files are written to.
@@ -134,9 +149,12 @@ public class DiscoverSettings
     {
         TmdbApiKey = (TmdbApiKey ?? string.Empty).Trim();
         Language = string.IsNullOrWhiteSpace(Language) ? "en" : Language.Trim().ToLowerInvariant();
-        MaxMovies = Math.Clamp(MaxMovies, 0, 20000);
+        MaxMovies = Math.Clamp(MaxMovies, 0, 100000);
+        NewestMovies = Math.Clamp(NewestMovies, 0, 10000);
         MaxSeries = Math.Clamp(MaxSeries, 0, 5000);
+        NewestSeries = Math.Clamp(NewestSeries, 0, 10000);
         MinVotes = Math.Clamp(MinVotes, 0, 100000);
+        NewestMinVotes = Math.Clamp(NewestMinVotes, 0, 100000);
         MinSeeders = Math.Clamp(MinSeeders, 0, 1000);
         MaxReleases = Math.Clamp(MaxReleases, 1, 100);
         MaxSizeGb = Math.Clamp(MaxSizeGb, 0, 1000);

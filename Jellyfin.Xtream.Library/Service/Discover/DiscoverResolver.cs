@@ -117,7 +117,12 @@ public sealed class DiscoverResolver
 
             var chosen = ReleaseLabeler.Select(found, settings);
             _logger.LogInformation("Discover: {Found} releases found for {Key}, offering {Offered}", found.Count, key, chosen.Count);
-            _releaseCache[key] = (DateTime.UtcNow, chosen);
+            if (chosen.Count > 0)
+            {
+                // An empty answer is usually an indexer outage; caching it would keep the title unplayable after it clears.
+                _releaseCache[key] = (DateTime.UtcNow, chosen);
+            }
+
             return chosen;
         }
         finally

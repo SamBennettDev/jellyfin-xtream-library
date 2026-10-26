@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
@@ -31,6 +32,7 @@ public sealed class TmdbClient
 {
     private const string BaseUrl = "https://api.themoviedb.org/3";
     private const int MaxPage = 500;
+    private const int MaxPerQuery = 10000;
 
     private readonly HttpClient _http;
 
@@ -45,22 +47,111 @@ public sealed class TmdbClient
     }
 
     /// <summary>
-    /// Lists titles by popularity, a page of 20 at a time.
+    /// Lists the most popular titles. TMDB returns at most 10,000 results for one query, so a longer list is built
+    /// from one query per release year and merged by popularity.
     /// </summary>
-    /// <param name="settings">The Discover settings (key, language, vote floor).</param>
+    /// <param name="settings">The Discover settings (key, language).</param>
     /// <param name="movies">Whether to list movies (otherwise series).</param>
     /// <param name="limit">The most titles to return.</param>
+    /// <param name="minVotes">The fewest votes a title needs.</param>
     /// <param name="cancellationToken">Cancellation.</param>
     /// <returns>The titles, most popular first.</returns>
-    public async Task<List<CatalogTitle>> ListPopularAsync(DiscoverSettings settings, bool movies, int limit, CancellationToken cancellationToken)
+    public async Task<List<CatalogTitle>> ListPopularAsync(DiscoverSettings settings, bool movies, int limit, int minVotes, CancellationToken cancellationToken)
+    {
+        if (limit <= 0)
+        {
+            return new List<CatalogTitle>();
+        }
+
+        if (limit <= MaxPerQuery)
+        {
+            return await ListPagesAsync(settings, movies, "popularity.desc", minVotes, null, null, limit, cancellationToken).ConfigureAwait(false);
+        }
+
+        var found = new Dictionary<int, CatalogTitle>();
+        var lockObject = new object();
+        using var gate = new SemaphoreSlim(6);
+        var thisYear = DateTime.UtcNow.Year;
+        var tasks = Enumerable.Range(1900, thisYear - 1900 + 1).Select(async year =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var part = await ListPagesAsync(
+                    settings,
+                    movies,
+                    "popularity.desc",
+                    minVotes,
+                    string.Create(CultureInfo.InvariantCulture, $"{year}-01-01"),
+                    string.Create(CultureInfo.InvariantCulture, $"{year}-12-31"),
+                    MaxPerQuery,
+                    cancellationToken).ConfigureAwait(false);
+                lock (lockObject)
+                {
+                    foreach (var title in part)
+                    {
+                        found[title.TmdbId] = title;
+                    }
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return found.Values.OrderByDescending(t => t.Popularity).Take(limit).ToList();
+    }
+
+    /// <summary>
+    /// Lists the newest titles that have already been released or aired, newest first.
+    /// </summary>
+    /// <param name="settings">The Discover settings.</param>
+    /// <param name="movies">Whether to list movies (otherwise series).</param>
+    /// <param name="limit">The most titles to return (up to 10,000, TMDB's cap for one query).</param>
+    /// <param name="minVotes">The fewest votes a title needs.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns>The titles, newest first.</returns>
+    public Task<List<CatalogTitle>> ListNewestAsync(DiscoverSettings settings, bool movies, int limit, int minVotes, CancellationToken cancellationToken)
+    {
+        if (limit <= 0)
+        {
+            return Task.FromResult(new List<CatalogTitle>());
+        }
+
+        var sort = movies ? "primary_release_date.desc" : "first_air_date.desc";
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return ListPagesAsync(settings, movies, sort, minVotes, null, today, Math.Min(limit, MaxPerQuery), cancellationToken);
+    }
+
+    private async Task<List<CatalogTitle>> ListPagesAsync(
+        DiscoverSettings settings,
+        bool movies,
+        string sort,
+        int minVotes,
+        string? from,
+        string? to,
+        int limit,
+        CancellationToken cancellationToken)
     {
         var result = new List<CatalogTitle>();
         var kind = movies ? "movie" : "tv";
+        var dateField = movies ? "primary_release_date" : "first_air_date";
         for (var page = 1; page <= MaxPage && result.Count < limit; page++)
         {
             var url = $"{BaseUrl}/discover/{kind}?with_original_language={Uri.EscapeDataString(settings.Language)}"
-                + $"&vote_count.gte={settings.MinVotes.ToString(CultureInfo.InvariantCulture)}&sort_by=popularity.desc"
+                + $"&vote_count.gte={minVotes.ToString(CultureInfo.InvariantCulture)}&sort_by={sort}"
                 + $"&include_adult=false&page={page.ToString(CultureInfo.InvariantCulture)}";
+            if (from is not null)
+            {
+                url += $"&{dateField}.gte={from}";
+            }
+
+            if (to is not null)
+            {
+                url += $"&{dateField}.lte={to}";
+            }
+
             var json = await GetAsync(settings, url, cancellationToken).ConfigureAwait(false);
             var items = json?["results"]?.AsArray();
             if (items is null || items.Count == 0)

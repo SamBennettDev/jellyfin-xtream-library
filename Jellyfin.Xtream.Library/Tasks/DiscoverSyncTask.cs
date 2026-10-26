@@ -65,6 +65,10 @@ public class DiscoverSyncTask : IScheduledTask
         {
             new TaskTriggerInfo
             {
+                Type = TaskTriggerInfoType.StartupTrigger,
+            },
+            new TaskTriggerInfo
+            {
                 Type = TaskTriggerInfoType.IntervalTrigger,
                 IntervalTicks = TimeSpan.FromHours(12).Ticks,
             },

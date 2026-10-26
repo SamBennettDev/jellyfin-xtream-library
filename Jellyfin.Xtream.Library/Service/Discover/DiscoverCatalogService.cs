@@ -202,9 +202,7 @@ public sealed partial class DiscoverCatalogService : IDisposable
         var wantedShows = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Movies.
-        var movies = settings.MaxMovies > 0
-            ? await _tmdb.ListPopularAsync(settings, movies: true, settings.MaxMovies, cancellationToken).ConfigureAwait(false)
-            : new List<CatalogTitle>();
+        var movies = await ListCatalogAsync(settings, movies: true, settings.MaxMovies, settings.NewestMovies, cancellationToken).ConfigureAwait(false);
         foreach (var movie in movies)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -225,9 +223,7 @@ public sealed partial class DiscoverCatalogService : IDisposable
         progress.Report(30);
 
         // Series: placeholders per aired episode, refetched at most weekly.
-        var series = settings.MaxSeries > 0
-            ? await _tmdb.ListPopularAsync(settings, movies: false, settings.MaxSeries, cancellationToken).ConfigureAwait(false)
-            : new List<CatalogTitle>();
+        var series = await ListCatalogAsync(settings, movies: false, settings.MaxSeries, settings.NewestSeries, cancellationToken).ConfigureAwait(false);
         var episodesWritten = 0;
         var seriesWritten = 0;
         var done = 0;
@@ -318,6 +314,17 @@ public sealed partial class DiscoverCatalogService : IDisposable
             result.Removed,
             result.SkippedOwned);
         return result;
+    }
+
+    private async Task<List<CatalogTitle>> ListCatalogAsync(DiscoverSettings settings, bool movies, int popular, int newest, CancellationToken cancellationToken)
+    {
+        // The most popular titles first, then the newest ones that are not already in the list.
+        var titles = await _tmdb.ListPopularAsync(settings, movies, popular, settings.MinVotes, cancellationToken).ConfigureAwait(false);
+        var seen = titles.Select(t => t.TmdbId).ToHashSet();
+        var fresh = await _tmdb.ListNewestAsync(settings, movies, newest, settings.NewestMinVotes, cancellationToken).ConfigureAwait(false);
+        titles.AddRange(fresh.Where(t => seen.Add(t.TmdbId)));
+        _logger.LogInformation("Discover: {Kind} list has {Count} titles ({Popular} popular, {Newest} newest requested)", movies ? "movie" : "series", titles.Count, popular, newest);
+        return titles;
     }
 
     private static int Prune(string root, HashSet<string> wanted)
